@@ -299,6 +299,7 @@ class GUI:
             if file.endswith(".txt"):
                 os.remove(os.path.join(self.raw_path,file))
 
+        self.root.title("InsectoVision - Scanning...")
         
         args = inference_pipeline.parse_args()
         inference_pipeline.main(args)
@@ -309,6 +310,7 @@ class GUI:
 
         os.rmdir("output")
 
+        self.root.title("InsectoVision - "+self.entoboxes[self.current].name)
         #print("inference done")
 
         for eb in self.entoboxes:
@@ -697,6 +699,7 @@ class GUI:
             lf.close()
             
     def save(self):
+        """
         missing = False
         for bbox in self.entoboxes[self.current].bboxes:
             if bbox.status == DOUBT:
@@ -705,9 +708,12 @@ class GUI:
         if missing:
             self.save_label.config(text="Save failed: Unvalidated boxes remaining")
             return
-        
+        """
+        #uncomment to force user to confirm all incorrect bboxes
+
         if not os.path.isdir(self.label_path):
-            self.save_label.config(text="Save failed: Save folder does not exist")
+            #self.save_label.config(text="Save failed: Save folder does not exist")
+            self.popup("Save failed: Save folder does not exist")
             return
 
         self.get_classes()
@@ -738,7 +744,9 @@ class GUI:
         if tf != None: tf.close()
         lf.close()
 
-        self.save_label.config(text="Save Successful")
+        #self.save_label.config(text="Save Successful")
+        self.popup("Save Successful")
+        
 
     def popup(self,text):
         popup_window = Toplevel()
