@@ -3,129 +3,15 @@ import sys
 import requests
 import inference_pipeline
 from shutil import rmtree, move
-from tkinter import *
+import tkinter as tk
 from tkinter import filedialog as fd
 from tkinter import ttk
 from PIL import ImageTk, Image
 
+from src.components.canvas import CanvasImage
+from src.models.boxes import BBox, EntoBox
+from src.consts import *
 
-#Constants
-DEFAULT_LABEL = "Insect"
-DEFAULT_MODEL = os.path.join("model","final_23.pt")
-
-#Drawing reasons
-NEW_BBOX = 1
-NEW_TAG = 2
-SELECTING = 3
-
-#Bbox status
-SURE=1          #AI's confidence is above threshold
-DOUBT=2         #AI's confidence is below threshold
-CONFIRMED=3     #User has confirmed the bbox is correct
-REJECTED=4      #User has confirmed the bbox is incorrect
-SELECTED=5      #Currently selected
-TAG=6           #User defined paper tag (saved in a separate yolo file, ignored in summary or count)
-COLORS =    {SURE:"chartreuse4"
-            ,DOUBT:"gold"
-            ,CONFIRMED:"green2"
-            ,REJECTED:"red"
-            ,SELECTED:"blue"
-            ,TAG:"purple"
-            }
-
-
-BWIDTH = 15 #Button width
-PADX = 5 #x axis padding between buttons/labels
-NONCANVASHEIGHT = 150
-NONCANVASWIDTH = 30
-
-
-#One image of an entomology box
-#Instance created only when images are loaded into the viewer 
-#(not when scanning with neural net) 
-class EntoBox:
-
-    def __init__(self,name,img_path,gui,bboxes_path = None):
-        self.name = name
-        #print("Loading "+name)
-
-        #Get the image
-        img = Image.open(os.path.join(img_path,name+".jpg"))        
-        self.dim = gui.get_dim((img.size))
-        self.image = ImageTk.PhotoImage(img.resize(self.dim))
-        img.close()
-
-        #Get the bboxes
-        self.bboxes = []
-        if bboxes_path != None:
-            self.get_bboxes(bboxes_path)
-
-
-    def get_bboxes(self,bboxes_path):
-        if(os.path.isfile(os.path.join(bboxes_path,self.name+".txt"))):
-            self.bboxes = []
-            txt = open(os.path.join(bboxes_path,self.name+".txt"))
-
-            #Compute bbox coordinates from yolo notation
-            for line in txt:
-                la = line.split(" ")[0:6]                                         
-                [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
-                x1 = int((x-w/2)*self.dim[0])
-                x2 = int((x+w/2)*self.dim[0])
-                y1 = int((y-h/2)*self.dim[1])
-                y2 = int((y+h/2)*self.dim[1])
-                if(len(la) == 6):
-                    c = float(la[5])
-                else:
-                    c = 1
-                self.bboxes.append(BBox([x1,y1,x2,y2],c,self))
-            txt.close()
-    
-    def show(self,gui):
-        gui.selected = []
-        gui.img_id = gui.canvas.create_image(int(self.dim[0]/2),int(self.dim[1]/2),image=gui.entoboxes[gui.current].image,tags=["picture"])
-
-        for bbox in self.bboxes:
-            bbox.draw(gui)
-
-
-class BBox:
-
-    status = None
-    itemId = None
-    label = DEFAULT_LABEL
-
-    def __init__(self,coord,conf,parent):
-        self.parent = parent
-        self.coord = coord
-        self.conf = conf
-    
-    def draw(self,gui):      
-        self.update_status(gui.conf_threshold)
-        boxid = gui.canvas.create_rectangle(self.coord[0],self.coord[1],self.coord[2],self.coord[3],outline=COLORS[self.status],width=2,tags=["bbox"])
-        self.itemId = boxid
-        gui.drawn_bboxes.append(self)
-    
-    def redraw(self,gui):
-        gui.canvas.delete(self.itemId)
-        self.draw(gui)
-
-    def to_yolo(self):
-        [d0,d1] = self.parent.dim
-        [x1,y1,x2,y2] = self.coord
-        x = ((float(x2+x1))/2)/d0
-        y = ((float(y2+y1))/2)/d1
-        w = float(abs(x2-x1))/d0
-        h = float(abs(y2-y1))/d1
-
-        return [x,y,w,h]
-
-    def update_status(self,ct):
-        if self.status in [None,DOUBT,SURE]:
-            if(self.conf < ct):
-                self.status = DOUBT
-            else:
-                self.status = SURE
 
 class GUI:
 
@@ -157,15 +43,27 @@ class GUI:
     al_nbr = 3
 
     def __init__(self):
-        root = Tk()
+        root = tk.Tk()
         root.minsize(300,150)
+        root.attributes('-zoomed', True)
         root.title("InsectoVision")
-        frm = ttk.Frame(root, padding=1)
-        frm.grid()
-        self.y_max = root.winfo_screenheight()-NONCANVASHEIGHT
-        self.x_max = root.winfo_screenwidth()-NONCANVASWIDTH
+        main_frame = ttk.Frame(root, padding=1)
+        main_frame.grid(sticky="nsew")
+        root.grid_columnconfigure(0, weight=1)
+        root.grid_rowconfigure(0, weight=1)
+
+        self.canvas_frame = ttk.Frame(main_frame)
+        self.canvas_frame.grid(column=0, row=0, sticky="nsew")
+        self.canvas_frame.grid_columnconfigure(0, weight=1)
+        self.canvas_frame.grid_rowconfigure(0, weight=1)
+
+        self.controls_frame = ttk.Frame(main_frame)
+        self.controls_frame.grid(column=1, row=0, sticky="ns")
+
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(1, weight=0)
+        main_frame.grid_rowconfigure(0, weight=1)
         self.root = root
-        self.frame = frm
 
         self.make_menubar()
 
@@ -174,10 +72,10 @@ class GUI:
         self.root.mainloop()
 
     def make_menubar(self):
-        menubar = Menu(self.root)
+        menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
-        filemenu = Menu(menubar,tearoff=False)
+        filemenu = tk.Menu(menubar,tearoff=False)
         filemenu.add_command(label="Select image folder...",command=self.choose_input)
         filemenu.add_command(label="Create folder from URL list...",command=self.choose_url_list_input)
         filemenu.add_command(label="Open selected images",command=self.load_images)
@@ -193,7 +91,7 @@ class GUI:
         filemenu.add_command(label="Parameters",command=self.model_params)
         menubar.add_cascade(label="File",menu=filemenu)
 
-        editmenu = Menu(menubar,tearoff=False)
+        editmenu = tk.Menu(menubar,tearoff=False)
         editmenu.add_command(label="New specimen bbox",command=self.start_draw)
         editmenu.add_command(label="New tag bbox",command=self.start_draw_tag)
         editmenu.add_command(label="Combine selected bboxes",command=self.combine)
@@ -257,6 +155,9 @@ class GUI:
             cnt += 1
     
     def load_images(self,names = None):
+        if(not self.started):
+           self.start()
+
         self.entoboxes = []
         if names is None:
             names = os.listdir(self.img_path)
@@ -265,24 +166,25 @@ class GUI:
 
         for entry in names:
             if(entry.endswith(".jpg")):
-                
+
+                img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],self.img_path,self,self.label_path))
+                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.label_path))
 
                 elif(os.path.exists(os.path.join(self.source_path,"raw_ai_labels",entry[:len(entry)-4]+".txt"))):
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],self.img_path,self,self.raw_path))
+                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.raw_path))
 
                 else:
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],self.img_path,self))
+                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path))
                     need_inf = True
         
         self.n_img = len(self.entoboxes)
 
-        if(not self.started):
-           self.start()
+        print(f"{len(self.entoboxes)} images")
+
         
         self.current = 0
-        self.show_image(0)
+        self.set_index(0)
 
         return need_inf
 
@@ -343,7 +245,7 @@ class GUI:
             self.model = fd.askopenfilename(initialdir="model",filetypes=[("PyTorch model file",".pt")])
             model_label.config(text="Model: "+ self.model)
 
-        param_window = Toplevel()
+        param_window = tk.Toplevel()
         param_window.config(width=600,height=100)
         param_window.geometry('+500+500')
         tfrm = ttk.Frame(param_window, padding=5)
@@ -354,7 +256,7 @@ class GUI:
         ttk.Button(tfrm,text="Select model",command=select_model).grid(row=0,column=1)
         
         
-        detonly = BooleanVar()
+        detonly = tk.BooleanVar()
         detonly.set(self.detection_only)
         ttk.Checkbutton(tfrm,text="Post-detection classifier",variable=detonly,onvalue=False,offvalue=True).grid(row=1,column=0)
         
@@ -402,7 +304,10 @@ class GUI:
         sf.close()
 
     def crop_current(self):
-        self.crop_bboxes(self.entoboxes[self.current])
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
+        self.crop_bboxes(entobox)
 
     def crop_bboxes(self,box):
         
@@ -467,172 +372,128 @@ class GUI:
 
         img.close()
 
-
     def start(self):
         self.make_interface()
-        self.make_canvas()
         self.make_thresh()
+
+    def current_entobox(self):
+        if self.current < len(self.entoboxes) and self.current >= 0:
+            return self.entoboxes[self.current]
+        return None
 
     def make_interface(self):
         #Title and buttons
-        self.title_label = ttk.Label(self.frame, text="Image "+str(self.current+1)+" /"+str(self.n_img))
+        self.title_label = ttk.Label(self.controls_frame, text="Image "+str(self.current+1)+" /"+str(self.n_img))
         self.title_label.grid(column=1, row=0)
-        self.number_label = ttk.Label(self.frame, text= str(len(self.entoboxes[self.current].bboxes))+" speciments detected",width=23)
+        self.number_label = ttk.Label(self.controls_frame, text= str(len(self.current_entobox().bboxes) if self.current_entobox() else 0)+" speciments detected",width=23)
         self.number_label.grid(column=2,row=0)
-        ttk.Button(self.frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=PADX)
-        ttk.Button(self.frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=PADX)
-        ttk.Button(self.frame,text="Good detection",command=self.rate_g,width=BWIDTH).grid(column=5,row=0,padx=PADX)
-        ttk.Button(self.frame,text="Bad detection",command=self.rate_b,width=BWIDTH).grid(column=5,row=1,padx=PADX)
-        ttk.Button(self.frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=6,row=1,padx=PADX)
-        ttk.Button(self.frame,text="New box",command=self.start_draw,width=BWIDTH).grid(column=6,row=0,padx=PADX)
-        ttk.Button(self.frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=7,row=0,padx=PADX)
+        ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=PADX)
+        ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=PADX)
+        ttk.Button(self.controls_frame,text="Good detection",command=self.rate_g,width=BWIDTH).grid(column=1,row=2,padx=PADX)
+        ttk.Button(self.controls_frame,text="Bad detection",command=self.rate_b,width=BWIDTH).grid(column=2,row=2,padx=PADX)
+        ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=3,padx=PADX)
+        ttk.Button(self.controls_frame,text="New box",command=self.start_draw,width=BWIDTH).grid(column=2,row=3,padx=PADX)
+        ttk.Button(self.controls_frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
-        ttk.Button(self.frame,text="Save",command=self.save,width=BWIDTH).grid(column=9,row=1,padx=PADX)
-        self.save_label = ttk.Label(self.frame)
-        self.save_label.grid(column=9,row=0,padx=PADX)
-
-    def make_canvas(self):
-        #Canvas for bounding boxes
-        self.canvas = Canvas(self.root,height=self.y_max,width=self.x_max)
-        self.canvas.grid(column=0,row=2,padx=20)
-        self.canvas.bind('<Button-1>',self.on_click)
-        self.canvas.bind('<Shift-Button-1>',self.select_many)
-        self.canvas.bind('<B1-Motion>',self.on_move_M1_held)
-        self.canvas.bind('<ButtonRelease-1>',self.on_M1_release)
-
-        if self.entoboxes != []:
-            self.entoboxes[0].show(self)
+        ttk.Button(self.controls_frame,text="Save",command=self.save,width=BWIDTH).grid(column=2,row=6,columnspan=2, padx=PADX)
+        self.save_label = ttk.Label(self.controls_frame)
+        self.save_label.grid(column=1,row=5,padx=PADX)
 
     def make_thresh(self):
-        self.thresh_label = ttk.Label(self.frame,width=26)
-        self.thresh_label.grid(column=8,row=0,padx=PADX)
+        self.thresh_label = ttk.Label(self.controls_frame,width=26)
+        self.thresh_label.grid(column=1,row=5,padx=PADX)
 
-        self.thresh_scale = ttk.Scale(self.frame, from_=0,to=100,command=self.update_thresh)
-        self.thresh_scale.grid(column=8,row=1,padx=PADX)
+        self.thresh_scale = ttk.Scale(self.controls_frame, from_=0,to=100,command=self.update_thresh)
+        self.thresh_scale.grid(column=2,row=5,padx=PADX)
         self.thresh_scale.set(100*self.conf_threshold)
-
-
+    
+    def draw_bbox(self, bbox):
+        bbox.update_status(self.conf_threshold)
+        boxid = self.canvas.canvas.create_rectangle(bbox.coord.x1,bbox.coord.y1,bbox.coord.x2,bbox.coord.y2,outline=COLORS[bbox.status],width=2,tags=["bbox"])
+        bbox.itemId = boxid
+        
+    def redraw_bbox(self,bbox):
+        self.canvas.delete(bbox.itemId)
+        self.draw_bbox(bbox)
 
     def next(self):
-        self.show_image(self.current+1)
+        self.set_index(self.current+1)
 
     def prev(self):
-        self.show_image(self.current-1)
+        self.set_index(self.current-1)
 
-    def show_image(self,n):
+    def set_index(self, n : int):
+        if self.n_img == 0:
+            return
+        self.current = (n + self.n_img) % self.n_img #Wraps around when going next/previous
+        self.show_image()
+
+    def show_image(self):
         self.save_label.config(text="")
-        self.current = (n)%self.n_img
         self.title_label.config(text="Image "+str(self.current+1)+" /"+str(self.n_img))
-        self.canvas.delete(self.img_id)
-        for bbox in self.drawn_bboxes:
-            self.canvas.delete(bbox.itemId)
-        self.entoboxes[self.current].show(self)
+
+        self.selected = []
+        self.canvas = CanvasImage(self.canvas_frame, self.current_entobox().image)
+        self.canvas.grid(column=0,row=0,sticky="nsew")
+
+
+        for bbox in self.current_entobox().bboxes:
+            self.canvas.draw_bbox(bbox)
+
         self.update_count()
-        self.root.title("InsectoVision - "+self.entoboxes[self.current].name)
+        self.root.title("InsectoVision - "+self.current_entobox().name)
 
 
     def unselect(self):
         for bbox in self.selected:
-            bbox.redraw(self)
+            self.redraw_bbox(bbox)
         self.selected = []
 
     def rate_g(self):
         for box in self.selected:
             box.status = CONFIRMED
-            box.redraw(self)
+            self.redraw_bbox(box)
         self.unselect()
         self.update_count()
     def rate_b(self):
         for box in self.selected:
             box.status = REJECTED
-            box.redraw(self)
+            self.redraw_bbox(box)
         self.unselect()
         self.update_count()
 
 
     def update_thresh(self,val):
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
+
         val = int(float(val))
         self.conf_threshold = float(val)/100
         self.thresh_label.config(text= "Confidence threshold: "+ str(val)+"%")
-        for bbox in self.entoboxes[self.current].bboxes:
+        for bbox in entobox.bboxes:
             if bbox.status == DOUBT and bbox.conf > self.conf_threshold:
                 bbox.status = SURE
             elif bbox.status == SURE and bbox.conf < self.conf_threshold:
                 bbox.status = DOUBT 
-        self.show_image(self.current) #Redraws current entobox 
+        self.set_index(self.current) #Redraws current entobox 
         self.update_count()
 
     def update_count(self):
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
         cnt = 0
-        for bbox in self.entoboxes[self.current].bboxes:
+        for bbox in entobox.bboxes:
             if bbox.status == CONFIRMED or bbox.status == SURE:
                 cnt += 1
         self.number_label.config(text= str(cnt)+" speciments detected")
 
 
-    def on_click(self,e): 
-        if self.drawing == False:
-            self.select(e)
-
-    def on_move_M1_held(self,e):
-        if not self.drawing:
-            self.draw_coord = [e.x,e.y]
-            self.drawing = True
-        self.canvas.delete(self.draw_indic)
-        self.draw_indic = self.canvas.create_rectangle(self.draw_coord[0],self.draw_coord[1],e.x,e.y,outline=COLORS[SELECTED],width=4)
-        
-    def on_M1_release(self,e):
-        if self.drawing:
-            self.canvas.delete(self.draw_indic)
-            x1 = min(self.draw_coord[0],e.x)
-            x2 = max(self.draw_coord[0],e.x)
-            y1 = min(self.draw_coord[1],e.y)
-            y2 = max(self.draw_coord[1],e.y)
-
-            if self.drawing_reason == SELECTING:
-                self.unselect()
-                for bbox in self.entoboxes[self.current].bboxes:
-                    c = bbox.coord
-                    if(x1<c[0] and y1<c[1] and x2>c[2] and y2>c[3]):
-                        self.selected.append(bbox)
-                        self.canvas.itemconfig(bbox.itemId,outline = COLORS[SELECTED])
-
-            elif self.drawing_reason in [NEW_BBOX,NEW_TAG]:
-                new = BBox([x1,y1,x2,y2],1,self.entoboxes[self.current])
-
-                if self.drawing_reason == NEW_BBOX:
-                    new.status = CONFIRMED
-                elif self.drawing_reason == NEW_TAG:
-                    new.status = TAG
-                
-                self.entoboxes[self.current].bboxes.append(new)
-                new.draw(self)
-                self.update_count()
-
-
-            self.drawing = False
-            self.drawing_reason = SELECTING
+    
         
 
-    def select(self,e,cumul = False):
-        found = None
-        for bbox in self.entoboxes[self.current].bboxes:
-            c = bbox.coord 
-            if (e.x>c[0] and e.y>c[1] and e.x<c[2] and e.y < c[3] and bbox not in self.selected):
-                self.canvas.itemconfig(bbox.itemId,outline = COLORS[SELECTED])
-                found = bbox
-                break
-
-        if found != None:
-            if cumul:
-                self.selected.append(found)
-            else:
-                self.unselect()
-                self.selected = [found]
-
-    def select_many(self,e):
-        self.select(e,True)
-
+    
 
     def combine(self):
         if len(self.selected)<2:
@@ -648,20 +509,23 @@ class GUI:
             if bbox.coord[3] > coord[3]:
                 coord[3] = bbox.coord[3]
         
-        self.entoboxes[self.current].bboxes = [box for box in self.entoboxes[self.current].bboxes if box not in self.selected]
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
+        entobox.bboxes = [box for box in entobox.bboxes if box not in self.selected]
         for bbox in self.selected:
             self.canvas.delete(bbox.itemId)
         self.selected = []
-        new = BBox(coord,1,self.entoboxes[self.current])
+        new = BBox(coord,1,entobox)
         new.status = CONFIRMED
-        new.draw(self)
-        self.entoboxes[self.current].bboxes.append(new)    
+        self.draw_bbox(new)
+        entobox.bboxes.append(new)    
         self.unselect()
         self.update_count()
 
 
     def add_label(self):
-        label_window = Toplevel()
+        label_window = tk.Toplevel()
         label_window.config(width=600,height=100)
         label_window.geometry('+500+500')
         tfrm = ttk.Frame(label_window, padding=5)
@@ -749,7 +613,7 @@ class GUI:
         
 
     def popup(self,text):
-        popup_window = Toplevel()
+        popup_window = tk.Toplevel()
         popup_window.config(width=600,height=100)
         popup_window.geometry('+500+500')
         tfrm = ttk.Frame(popup_window, padding=5)
@@ -766,7 +630,8 @@ class GUI:
     def get_dim(self,dim):
         x = dim[0]
         y = dim[1]
-        scale = min(self.x_max/x,self.y_max/y)
+        self.root.update_idletasks()
+        scale = min(self.canvas.winfo_width()/x,self.canvas.winfo_height()/y)
         return(int(x*scale),int(y*scale))
 
     def on_close(self):

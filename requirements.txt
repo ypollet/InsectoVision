@@ -1,0 +1,7 @@
+opencv-python
+tensorflow
+pyyaml
+pandas
+matplotlib
+scikit-learn
+ultralytics

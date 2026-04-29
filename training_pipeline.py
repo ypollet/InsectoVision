@@ -47,7 +47,7 @@ def main(args):
         original_images_dir = os.path.join(dataset_dir, "images")
         original_labels_dir = os.path.join(dataset_dir, "labels")
         output_yaml_path = os.path.join(dataset_dir, "data.yaml")
-        class_names = ["insect"]
+        class_names = ["insect"] # TODO update class names
         val_split = 0.2
         random.seed(seed)
 
@@ -351,15 +351,15 @@ def parse_args():
     parser.add_argument(
         "--gpu",
         type=str,
-        default="mps",
-        help="Gpu to use, the default is the macos standard (default: mps)"
+        default="cuda:0",
+        help="Gpu to use, the default is the macos standard (default: cuda:0)"
     )
     parser.add_argument(
         "--fine_tuning_steps",
         type=int,
-        default=3,
+        default=23,
         help="Number of fine-tuning runs, with a constant rate of layer "
-             "unfreezing down to 0 frozen layers (default: 3)"
+             "unfreezing down to 0 frozen layers (default: 23)"
     )
     parser.add_argument(
         "--lr_classification",
@@ -394,8 +394,8 @@ def parse_args():
     parser.add_argument(
         "--batch_min",
         type=int,
-        default=8,
-        help="Minimal batch size from which it will start plateauing (default: 8)"
+        default=16,
+        help="Minimal batch size from which it will start plateauing (default: 16)"
     )
     parser.add_argument(
         "--batch_decrease_rate",

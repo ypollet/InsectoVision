@@ -4,3 +4,13 @@ output/
 .DS_Store
 model/.DS_Store
 __pycache__
+test.py
+.vscode
+.insect
+model/insects_output.pt
+model/rbins.keras
+model/rbins.pt
+runs/
+test_datasets/
+train_datasets/
+model/labels_output.pt
