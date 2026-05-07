@@ -4,6 +4,8 @@ import os
 DEFAULT_LABEL = "Insect"
 DEFAULT_MODEL = os.path.join("model","final_23.pt")
 
+DEFAULT_CONF = 0.85
+
 #Drawing reasons
 NEW_BBOX = 1
 NEW_TAG = 2
@@ -27,5 +29,5 @@ COLORS =    {SURE:"chartreuse4"
 
 BWIDTH = 15 #Button width
 PADX = 0 #x axis padding between buttons/labels
-NONCANVASHEIGHT = 150
-NONCANVASWIDTH = 30
+
+MIN_SIZE_CANVAS = 500

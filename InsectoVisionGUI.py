@@ -32,7 +32,6 @@ class GUI:
     detection_only = True
 
     n_img = 0
-    conf_threshold = 0.85
     crop_margin = 1.1
 
     drawing = False
@@ -56,6 +55,8 @@ class GUI:
         self.canvas_frame.grid(column=0, row=0, sticky="nsew")
         self.canvas_frame.grid_columnconfigure(0, weight=1)
         self.canvas_frame.grid_rowconfigure(0, weight=1)
+
+        self.canvas = None
 
         self.controls_frame = ttk.Frame(main_frame)
         self.controls_frame.grid(column=1, row=0, sticky="ns")
@@ -95,7 +96,7 @@ class GUI:
         editmenu.add_command(label="New specimen bbox",command=self.start_draw)
         editmenu.add_command(label="New tag bbox",command=self.start_draw_tag)
         editmenu.add_command(label="Combine selected bboxes",command=self.combine)
-        editmenu.add_command(label="Add label",command=self.add_label)
+        #editmenu.add_command(label="Add label",command=self.add_label)
         menubar.add_cascade(label="Edit",menu=editmenu)
 
         #aimenu = Menu(menubar,tearoff=False)
@@ -104,7 +105,7 @@ class GUI:
         #menubar.add_cascade(label="AI",menu=aimenu)
         
     def choose_input(self):
-        path = fd.askdirectory()
+        path = fd.askdirectory(initialdir="test_datasets")
 
         for folder in ["images","labels","raw_ai_labels"]:
             if not os.path.exists(os.path.join(path,folder)):
@@ -124,7 +125,6 @@ class GUI:
                 move(os.path.join(path,file),self.label_path)
         
         self.root.title("Insectovision - "+self.img_path)
-        #print(self.img_path)
 
     def choose_url_list_input(self):
         
@@ -180,7 +180,6 @@ class GUI:
         
         self.n_img = len(self.entoboxes)
 
-        print(f"{len(self.entoboxes)} images")
 
         
         self.current = 0
@@ -189,7 +188,6 @@ class GUI:
         return need_inf
 
     def run_inference(self):
-        #print("img_path = "+self.img_path)
         sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent","--model"]
         sys.argv.append(self.model)
         if self.detection_only: 
@@ -207,19 +205,17 @@ class GUI:
         inference_pipeline.main(args)
 
         for file in os.listdir("output"):
-            #print(file)
             move(os.path.join(os.getcwd(),"output",file),os.path.join(self.source_path,"raw_ai_labels"))
 
         os.rmdir("output")
 
         self.root.title("InsectoVision - "+self.entoboxes[self.current].name)
-        #print("inference done")
 
         for eb in self.entoboxes:
             eb.get_bboxes(self.raw_path)
         
         if self.entoboxes != []:
-            self.show_image(self.current)
+            self.show_image()
 
     def quick_open(self,use_url = False):
         if use_url:
@@ -389,31 +385,33 @@ class GUI:
         self.number_label.grid(column=2,row=0)
         ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=PADX)
         ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=PADX)
-        ttk.Button(self.controls_frame,text="Good detection",command=self.rate_g,width=BWIDTH).grid(column=1,row=2,padx=PADX)
-        ttk.Button(self.controls_frame,text="Bad detection",command=self.rate_b,width=BWIDTH).grid(column=2,row=2,padx=PADX)
+        ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=2,padx=PADX)
+        ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=2,padx=PADX)
         ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=3,padx=PADX)
         ttk.Button(self.controls_frame,text="New box",command=self.start_draw,width=BWIDTH).grid(column=2,row=3,padx=PADX)
-        ttk.Button(self.controls_frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=1,row=4,padx=PADX)
+        #ttk.Button(self.controls_frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
         ttk.Button(self.controls_frame,text="Save",command=self.save,width=BWIDTH).grid(column=2,row=6,columnspan=2, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 
+        self.root.bind("<Delete>", lambda e :self.reject_selected())
+        self.root.bind("<Return>", lambda e :self.confirm_selected())
+
     def make_thresh(self):
-        self.thresh_label = ttk.Label(self.controls_frame,width=26)
+        self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
         self.thresh_label.grid(column=1,row=5,padx=PADX)
 
         self.thresh_scale = ttk.Scale(self.controls_frame, from_=0,to=100,command=self.update_thresh)
         self.thresh_scale.grid(column=2,row=5,padx=PADX)
-        self.thresh_scale.set(100*self.conf_threshold)
+        self.thresh_scale.set(100*DEFAULT_CONF)
     
     def draw_bbox(self, bbox):
-        bbox.update_status(self.conf_threshold)
-        boxid = self.canvas.canvas.create_rectangle(bbox.coord.x1,bbox.coord.y1,bbox.coord.x2,bbox.coord.y2,outline=COLORS[bbox.status],width=2,tags=["bbox"])
-        bbox.itemId = boxid
+        self.canvas.draw_bbox(bbox)
         
     def redraw_bbox(self,bbox):
-        self.canvas.delete(bbox.itemId)
+        self.canvas.delete_bbox(bbox)
+        bbox.itemId = None
         self.draw_bbox(bbox)
 
     def next(self):
@@ -423,63 +421,82 @@ class GUI:
         self.set_index(self.current-1)
 
     def set_index(self, n : int):
+        
         if self.n_img == 0:
             return
         self.current = (n + self.n_img) % self.n_img #Wraps around when going next/previous
         self.show_image()
 
     def show_image(self):
+        self.close_image()
+
+        entobox : EntoBox = self.current_entobox()
+
         self.save_label.config(text="")
         self.title_label.config(text="Image "+str(self.current+1)+" /"+str(self.n_img))
 
         self.selected = []
-        self.canvas = CanvasImage(self.canvas_frame, self.current_entobox().image)
+        self.canvas_frame.update_idletasks()
+        self.canvas = CanvasImage(self.canvas_frame, entobox)
         self.canvas.grid(column=0,row=0,sticky="nsew")
 
+        # draw bboxes
+        self.canvas.draw_all_bboxes()
+        self.canvas.canvas.bind("<<OnBBoxModified>>", self.update_count)
 
-        for bbox in self.current_entobox().bboxes:
-            self.canvas.draw_bbox(bbox)
+        self.set_thresh()
+        self.root.title("InsectoVision - "+entobox.name)
 
-        self.update_count()
-        self.root.title("InsectoVision - "+self.current_entobox().name)
-
-
+    def close_image(self):
+        """ Close image """
+        if self.canvas:
+            self.canvas.destroy()
+            self.canvas = None
+    
     def unselect(self):
         for bbox in self.selected:
             self.redraw_bbox(bbox)
         self.selected = []
 
-    def rate_g(self):
-        for box in self.selected:
-            box.status = CONFIRMED
-            self.redraw_bbox(box)
-        self.unselect()
-        self.update_count()
-    def rate_b(self):
-        for box in self.selected:
-            box.status = REJECTED
-            self.redraw_bbox(box)
-        self.unselect()
-        self.update_count()
+    def confirm_selected(self):
+        if self.canvas:
+            self.canvas.confirm_selected()
+            self.update_count()
+    
+    def reject_selected(self):
+        if self.canvas:
+            self.canvas.reject_selected()
+            self.update_count()
+
 
 
     def update_thresh(self,val):
-        entobox = self.current_entobox()
+        entobox : EntoBox = self.current_entobox()
         if entobox is None:
             return
 
         val = int(float(val))
-        self.conf_threshold = float(val)/100
-        self.thresh_label.config(text= "Confidence threshold: "+ str(val)+"%")
+        entobox.conf_threshold = float(val)/100
+        self.set_thresh(False)
+        
+    
+    def set_thresh(self, update_thresh_scale = True):
+        entobox : EntoBox = self.current_entobox()
+        if entobox is None:
+            return
+        self.thresh_label.config(text= f"Confidence threshold: {int(entobox.conf_threshold*100)}%")
+
         for bbox in entobox.bboxes:
-            if bbox.status == DOUBT and bbox.conf > self.conf_threshold:
-                bbox.status = SURE
-            elif bbox.status == SURE and bbox.conf < self.conf_threshold:
-                bbox.status = DOUBT 
-        self.set_index(self.current) #Redraws current entobox 
+            if bbox.status == REJECTED or bbox.status == CONFIRMED:
+                continue
+            bbox.update_status(entobox.conf_threshold)
+            self.canvas.update_bbox_color(bbox)
+        #self.set_index(self.current) #Redraws current entobox 
+        if update_thresh_scale:
+            self.thresh_scale.set(int(entobox.conf_threshold*100))
         self.update_count()
 
-    def update_count(self):
+    def update_count(self, event=None):
         entobox = self.current_entobox()
         if entobox is None:
             return
