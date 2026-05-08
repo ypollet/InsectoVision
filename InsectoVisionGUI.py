@@ -602,19 +602,24 @@ class GUI:
         lf = open(os.path.join(self.label_path,"classes.txt"),"a")
         f = open(os.path.join(self.label_path,self.entoboxes[self.current].name)+".txt","w")
         tf = None
+
+        entobox = self.current_entobox()
+        if entobox is None:
+            self.popup("Save failed: No image loaded")
+            return
         
 
-        for bbox in self.entoboxes[self.current].bboxes:
+        for bbox in entobox.bboxes:
             if bbox.status in [SURE,CONFIRMED]:
                 if bbox.label not in self.classes:
                     lf.write(bbox.label+"\n")
                     self.classes.append(bbox.label)
                 cnum = self.classes.index(bbox.label)
-                f.write(str(cnum)+" "+" ".join(str(x) for x in bbox.to_yolo())+ "\n")
+                f.write(str(cnum)+" "+" ".join(str(x) for x in bbox.to_yolo(entobox.width, entobox.height))+ "\n")
 
             elif bbox.status == TAG: #Write tags to a separate yolo file with the same class system (can be used for tag detection training)
                 if tf is None:
-                    tf = open(os.path.join(self.label_path,self.entoboxes[self.current].name)+"_tags.txt","w")
+                    tf = open(os.path.join(self.label_path,entobox.name)+"_tags.txt","w")
                 if bbox.label not in self.classes:
                     lf.write(bbox.label+"\n")
                     self.classes.append(bbox.label)

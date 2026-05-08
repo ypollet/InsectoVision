@@ -15,15 +15,15 @@ class EntoBox:
         self.image = img_path
         with Image() as img:
             t = img.ping(filename=f'{img_path}[0]')
-            width, height = t.width, t.height
+            self.width, self.height = t.width, t.height
 
-        print(f"Image {name} dim = {width}x{height}")
+        print(f"Image {name} dim = {self.width}x{self.height}")
 
         #Get the bboxes
         self.bboxes = []
         self.conf_threshold = conf_threshold
         if bboxes_path != None:
-            self.get_bboxes(bboxes_path, width, height)
+            self.get_bboxes(bboxes_path, self.width, self.height)
 
 
     def get_bboxes(self,bboxes_path, width, height):
@@ -58,14 +58,13 @@ class BBox:
         self.conf : float = conf
         self.is_selected = False
 
-    def to_yolo(self):
-        # TODO : add height and width
+    def to_yolo(self, width, height):
         x1, y1, x2, y2 = self.coord.to_list()
 
-        x = ((float(x2+x1))/2)
-        y = ((float(y2+y1))/2)
-        w = float(abs(x2-x1))
-        h = float(abs(y2-y1))
+        x = ((float(x2+x1))/2) / width
+        y = ((float(y2+y1))/2) / height
+        w = float(abs(x2-x1))/ width
+        h = float(abs(y2-y1))/ height
 
         return [x,y,w,h]
 
