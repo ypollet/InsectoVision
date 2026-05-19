@@ -24,6 +24,7 @@ def main(args):
 
     # Prepare output directory
     api.warn_user_if_directory_exists("output", silent=args.silent)
+    api.warn_user_if_directory_exists("output/config", silent=args.silent)
 
     # Force detection-only mode if high-precision is enabled,
     # because high-precision already uses the classifier's predictions in its input saliency maps,
@@ -139,6 +140,20 @@ def main(args):
     # Print average inference time
     if not args.silent:
         print("Average inference time on all images:", np.mean(np.asarray(times)))
+    
+    with open(f"output/config/classes.txt", "w") as f:
+        class_names = set()
+        for model in to_be_ensembled:
+        
+            classes_indices = sorted(model.names.keys())
+
+            for i in classes_indices:
+                if model.names[i] not in class_names:
+                    f.write(f"{model.names[i]}\n")
+                    class_names.add(model.names[i])
+        
+
+
 
 
 def parse_args():

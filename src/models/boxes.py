@@ -23,10 +23,10 @@ class EntoBox:
         self.bboxes = []
         self.conf_threshold = conf_threshold
         if bboxes_path != None:
-            self.get_bboxes(bboxes_path, self.width, self.height)
+            self.get_bboxes(bboxes_path)
 
 
-    def get_bboxes(self,bboxes_path, width, height):
+    def get_bboxes(self,bboxes_path):
         if(os.path.isfile(os.path.join(bboxes_path,self.name+".txt"))):
             self.bboxes = []
             txt = open(os.path.join(bboxes_path,self.name+".txt"))
@@ -35,10 +35,10 @@ class EntoBox:
             for line in txt:
                 la = line.split(" ")[0:6]                                         
                 [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
-                x1 = (x-w/2)*width
-                x2 = (x+w/2)*width
-                y1 = (y-h/2)*height
-                y2 = (y+h/2)*height
+                x1 = (x-w/2)*self.width
+                x2 = (x+w/2)*self.width
+                y1 = (y-h/2)*self.height
+                y2 = (y+h/2)*self.height
                 if(len(la) == 6):
                     c = float(la[5])
                 else:

@@ -107,7 +107,7 @@ class GUI:
     def choose_input(self):
         path = fd.askdirectory(initialdir="test_datasets")
 
-        for folder in ["images","labels","raw_ai_labels"]:
+        for folder in ["images","labels", "labels/config","raw_ai_labels"]:
             if not os.path.exists(os.path.join(path,folder)):
                 os.mkdir(os.path.join(path,folder))
 
@@ -213,6 +213,8 @@ class GUI:
 
         for eb in self.entoboxes:
             eb.get_bboxes(self.raw_path)
+        
+        self.get_classes()
         
         if self.entoboxes != []:
             self.show_image()
@@ -389,6 +391,7 @@ class GUI:
         ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=2,padx=PADX)
         ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=3,padx=PADX)
         ttk.Button(self.controls_frame,text="New box",command=self.start_draw,width=BWIDTH).grid(column=2,row=3,padx=PADX)
+        ttk.Radiobutton(parent, text='option 2', style='Toolbutton')
         #ttk.Button(self.controls_frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
         ttk.Button(self.controls_frame,text="Save",command=self.save,width=BWIDTH).grid(column=2,row=6,columnspan=2, padx=PADX)
@@ -568,16 +571,24 @@ class GUI:
 
 
     def get_classes(self):
-        name = os.path.join(self.label_path,"classes.txt")
+        name = os.path.join(self.label_path, "config","classes.txt")
 
         if not os.path.isfile(name):
             open(name,"w")
+            name_raw = os.path.join(self.raw_path, "config","classes.txt")
+            lf = open(name_raw,"r")
+            self.classes = []
+            for line in lf:
+                self.classes.append(line.strip("\n"))
+            lf.close()
         else:
             lf = open(name,"r")
             self.classes = []
             for line in lf:
                 self.classes.append(line.strip("\n"))
             lf.close()
+        
+        print(self.classes)
             
     def save(self):
         """
@@ -599,7 +610,7 @@ class GUI:
 
         self.get_classes()
         
-        lf = open(os.path.join(self.label_path,"classes.txt"),"a")
+        lf = open(os.path.join(self.label_path, "config","classes.txt"),"a")
         f = open(os.path.join(self.label_path,self.entoboxes[self.current].name)+".txt","w")
         tf = None
 
