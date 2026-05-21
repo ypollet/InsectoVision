@@ -14,13 +14,12 @@ from PIL import Image, ImageTk
 from PIL.Image import Resampling
 
 from src.components.scrollbar import AutoScrollbar 
-from src.models.boxes import BBox, EntoBox
-from src.models.coords import Coords, Point
-from src.consts import *
+from src.consts import MIN_SIZE_CANVAS
+
 
 class CanvasImage:
     """ Display and zoom image """
-    def __init__(self, placeholder : ttk.Frame, entobox : EntoBox):
+    def __init__(self, placeholder : ttk.Frame, path : str):
         """ Initialize the ImageFrame """
         self.width_line = 3
         self.radius_circle = 4
@@ -28,8 +27,8 @@ class CanvasImage:
         self.__delta = 1.3  # zoom magnitude
         self.__filter = Resampling.LANCZOS  # could be: NEAREST, BILINEAR, BICUBIC and LANCZOS
         self.__previous_state = 0  # previous state of the keyboard
-        self.entobox = entobox
-        self.path = entobox.image  # path to the image, should be public for outer classes
+        
+        self.path = path  # path to the image, should be public for outer classes
         # Create ImageFrame in placeholder widget
         self.__imframe = ttk.Frame(placeholder)  # placeholder of the ImageFrame object
         self.__imframe.pack(expand=True, fill='both')
@@ -60,9 +59,7 @@ class CanvasImage:
         self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
         self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
 
-        self.canvas.bind('<Button-1>',   self.create_rec)
-        self.canvas.bind('<B1-Motion>',   self.on_move_M1_held)
-        self.canvas.bind('<ButtonRelease-1>',   self.on_M1_release) 
+        
         # Handle keystrokes in idle mode, because program slows down on a weak computers,
         # when too many key stroke events in the same time
         self.canvas.bind('<Key>', lambda event: self.canvas.after_idle(self.__keystroke, event))
@@ -101,18 +98,8 @@ class CanvasImage:
         # Put image into container rectangle and use it to set proper coordinates to the image
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
 
-        self.bboxes_id : dict[int | str, BBox] = dict()
-        self.points_id : dict[int | str, Point] = dict()
-
-        self.selected = []
-        self.moved = False
-        self.draw_coord = None # Drawing rectangle
-        self.draw_indic = None
-
-
         self.__fit_and_show_canvas()
         self.canvas.focus_set()  # set focus on the canvas
-
 
     def smaller(self):
         """ Resize image proportionally and return smaller image """
@@ -216,7 +203,6 @@ class CanvasImage:
         self.redraw_figures()
         self.__show_image()
         
-
     def __show_image(self):
         """ Show image on the Canvas. Implements correct image zoom almost like in Google Maps """
         box_image = self.canvas.coords(self.container)  # get image area
@@ -324,184 +310,6 @@ class CanvasImage:
             elif event.keycode in [83, 40, 98]:  # scroll down: keys 'S', 'Down' or 'Numpad-2'
                 self.__scroll_y('scroll',  1, 'unit', event=event)
 
-    def create_rec(self,e : tk.Event):
-        if e.widget.tag_click:
-            return
-        
-        x, y = self.canvas.canvasx(e.x), self.canvas.canvasy(e.y)
-        self.draw_coord = (x, y)
-        self.draw_indic = self.canvas.create_rectangle(x,y,x,y,outline=COLORS[SELECTED],width=self.width_line)
-
-    def on_move_M1_held(self,e):
-        if e.widget.tag_click:
-            return
-
-        x1, y1 = self.draw_coord[0], self.draw_coord[1]
-        x2, y2 = self.canvas.canvasx(e.x), self.canvas.canvasy(e.y)
-
-        self.canvas.coords(self.draw_indic, x1, y1, x2, y2)
-        
-        
-    
-    def on_M1_release(self,e):
-        if e.widget.tag_click:
-            e.widget.tag_click = False
-            return
-        self.canvas.delete(self.draw_indic)
-        self.draw_indic = False
-        x1, y1 = self.__ratio2image(self.draw_coord[0], self.draw_coord[1])
-        x2, y2 = self.__ratio2image(self.canvas.canvasx(e.x), self.canvas.canvasy(e.y))
-
-        new = BBox([x1,y1,x2,y2],1,self.entobox)
-
-        new.status = CONFIRMED
-                
-        self.entobox.bboxes.append(new)
-        self.draw_bbox(new)
-        self.canvas.event_generate("<<OnBBoxModified>>")
-
-
-
-    def draw_all_bboxes(self):
-        for bbox in self.entobox.bboxes:
-            self.draw_bbox(bbox)
-
-    def draw_bbox(self, bbox : BBox):
-        if bbox.itemId is not None or bbox.status == REJECTED:
-            return
-        [x1, y1, x2, y2] = bbox.coord.to_list()
-
-        x1, y1 = self.__ratio2canvas(x1, y1)
-        x2, y2 = self.__ratio2canvas(x2, y2)
-        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=COLORS[bbox.status],width=self.width_line,tags=["bbox"], fill="gray", stipple='@transparent.xbm')
-        self.canvas.tag_bind(boxid, '<Button-1>', lambda e: self.select_rec(boxid, e))
-        self.canvas.tag_bind(boxid, '<Control-1>', lambda e: self.select_many_rec(boxid, e))
-        
-        bbox.itemId = boxid
-        self.bboxes_id[boxid] = bbox
-
-        
-
-        point_id_first = self.canvas.create_oval(x1, y1,
-                                    x1, y1,
-                                    width=self.width_line * self.radius_circle, outline=COLORS[bbox.status])
-        self.bind_points_events(point_id_first, boxid)
-        bbox.coord.first.itemId = point_id_first
-        self.points_id[point_id_first] = bbox.coord.first
-
-        point_id_second = self.canvas.create_oval(x2, y2,
-                                    x2, y2,
-                                    width=self.width_line * self.radius_circle, outline=COLORS[bbox.status])
-        self.bind_points_events(point_id_second, boxid)
-        bbox.coord.second.itemId = point_id_second
-        self.points_id[point_id_second] = bbox.coord.second
-
-    def bind_points_events(self, pointId, boxId):
-        self.canvas.tag_bind(pointId, '<B1-Motion>', lambda e: self.__move_point(pointId, boxId, e))
-        self.canvas.tag_bind(pointId, '<ButtonRelease-1>', lambda e: self.confirm(boxId))
-        self.canvas.tag_bind(pointId, '<Button-1>', lambda e: self.select_rec(boxId, e))
-        self.canvas.tag_bind(pointId, '<Control-1>', lambda e: self.select_many_rec(boxId, e))
-
-    def unselect(self):
-        for boxid in self.selected:
-            bbox = self.bboxes_id[boxid]
-            bbox.is_selected = False
-            self.update_bbox_color(bbox)
-        
-        self.selected = []
-
-
-    def select_rec(self, boxid, event : tk.Event):
-        event.widget.tag_click = True
-        self.unselect()
-        self.select_many_rec(boxid, event)
-        
-    
-    def select_many_rec(self, boxid, event):
-        event.widget.tag_click = True
-        bbox = self.bboxes_id[boxid]
-        bbox.is_selected = not bbox.is_selected
-        if bbox.is_selected:
-            self.selected.append(boxid)
-        else:
-            self.selected.remove(boxid)
-        self.update_bbox_color(bbox)
-
-    def confirm(self, boxid):
-        if self.moved:
-            self.unselect()
-            bbox : BBox = self.bboxes_id[boxid]
-            bbox.status = CONFIRMED
-            self.update_bbox_color(bbox)
-            self.moved = False
-            self.canvas.event_generate("<<OnBBoxModified>>")
-
-    def confirm_selected(self):
-        for boxid in self.selected:
-            bbox : BBox = self.bboxes_id[boxid]
-            bbox.status = CONFIRMED
-            bbox.is_selected = False #unselect
-            self.update_bbox_color(bbox)
-
-        self.selected = []
-    
-    def reject_selected(self):
-        for boxid in self.selected:
-            bbox : BBox = self.bboxes_id[boxid]
-            bbox.status = REJECTED
-            bbox.is_selected = False #unselect
-            self.update_bbox_color(bbox)
-
-        self.selected = []
-
-    def __ratio2image(self, x, y):
-        box_image = self.canvas.coords(self.container)  # get image area
-        x = (x - box_image[0]) / self.imscale
-        y = (y - box_image[1]) / self.imscale
-        return x,y
-    
-    def __ratio2canvas(self, x, y):
-        box_image = self.canvas.coords(self.container)  # get image area
-        x = x * self.imscale + box_image[0]
-        y = y * self.imscale + box_image[1]
-        return x,y
-    
-    def __move_point(self, pointId, boxId, event : tk.Event):
-        self.moved = True
-        x, y = self.__ratio2image(self.canvas.canvasx(event.x), self.canvas.canvasy(event.y))
-        point = self.points_id[pointId]
-        
-        dx, dy = point.move(x, y)
-        self.canvas.move(pointId, dx * self.imscale, dy * self.imscale)
-
-        bbox = self.bboxes_id[boxId]
-        self.update_bbox_coords(boxId, bbox.coord)
-
-    def update_bbox_coords(self, itemId : str | int, coords : Coords):
-        x1, y1 = self.__ratio2canvas(*coords.first.to_list())
-        x2, y2 = self.__ratio2canvas(*coords.second.to_list())
-        self.canvas.coords(itemId, x1, y1, x2, y2)        
-        
-    def update_bbox_color(self, bbox : BBox):
-        if bbox.itemId is None:
-            self.draw_bbox(bbox)
-            return
-        if bbox.status == REJECTED:
-            self.canvas.delete(bbox.itemId)
-            #delete the points as well
-            self.canvas.delete(bbox.coord.first.itemId)
-            self.canvas.delete(bbox.coord.second.itemId)
-            return
-        color = COLORS[SELECTED] if bbox.is_selected else COLORS[bbox.status]
-
-        self.canvas.itemconfig(bbox.itemId, outline=color)
-        self.canvas.itemconfig(bbox.coord.first.itemId, outline=color)
-        self.canvas.itemconfig(bbox.coord.second.itemId, outline=color)
-
-    def delete_bbox(self, bbox : BBox):
-        self.canvas.delete(bbox.itemId)
-
-
     def crop(self, bbox):
         """ Crop rectangle from the image and return it """
         if self.__huge:  # image is huge and not totally in RAM
@@ -524,13 +332,3 @@ class CanvasImage:
         del self.__pyramid  # delete pyramid variable
         self.canvas.destroy()
         self.__imframe.destroy()
-
-        for id in self.bboxes_id:
-            self.bboxes_id[id].itemId = None
-
-        self.bboxes_id : dict[int | str, BBox] = dict()
-
-        for id in self.points_id:
-            self.points_id[id].itemId = None
-
-        self.points_id = dict()

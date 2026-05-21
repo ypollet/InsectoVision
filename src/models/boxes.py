@@ -51,6 +51,7 @@ class BBox:
     status = DOUBT
     itemId = None
     label = DEFAULT_LABEL
+    group = ""
 
     def __init__(self,coord,conf : float,parent : EntoBox):
         self.parent : EntoBox = parent

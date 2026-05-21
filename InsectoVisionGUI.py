@@ -6,9 +6,10 @@ from shutil import rmtree, move
 import tkinter as tk
 from tkinter import filedialog as fd
 from tkinter import ttk
-from PIL import ImageTk, Image
+from PIL import Image
+from collections import defaultdict
 
-from src.components.canvas import CanvasImage
+from src.components.entobox_canvas import EntoboxCanvas
 from src.models.boxes import BBox, EntoBox
 from src.consts import *
 
@@ -93,8 +94,9 @@ class GUI:
         menubar.add_cascade(label="File",menu=filemenu)
 
         editmenu = tk.Menu(menubar,tearoff=False)
-        editmenu.add_command(label="New specimen bbox",command=self.start_draw)
-        editmenu.add_command(label="New tag bbox",command=self.start_draw_tag)
+        editmenu.add_command(label="Edit boxes Ctrl+E",command=self.edit_mode)
+        editmenu.add_command(label="Drawing boxes Ctrl+B",command=self.draw_mode)
+        
         editmenu.add_command(label="Combine selected bboxes",command=self.combine)
         #editmenu.add_command(label="Add label",command=self.add_label)
         menubar.add_cascade(label="Edit",menu=editmenu)
@@ -103,7 +105,14 @@ class GUI:
         #aimenu.add_command(label="Open images for active learning",command=self.open_AL)
         #aimenu.add_command(label="Retrain model with new annotations")
         #menubar.add_cascade(label="AI",menu=aimenu)
-        
+
+    def draw_mode(self):
+        if self.canvas != None:
+            self.canvas.set_to_drawing()
+    def edit_mode(self):
+        if self.canvas != None:
+            self.canvas.set_to_selecting()
+
     def choose_input(self):
         path = fd.askdirectory(initialdir="test_datasets")
 
@@ -227,7 +236,6 @@ class GUI:
         
         if need_inf: self.run_inference()
 
-
     def open_AL(self):
         self.entoboxes = []
         
@@ -274,7 +282,7 @@ class GUI:
         
     def summarize(self):
         
-        types = {}
+        types = defaultdict(int)
         self.get_classes()
 
         for boxfile in os.listdir(self.label_path):
@@ -282,10 +290,7 @@ class GUI:
                 b = open(os.path.join(self.label_path,boxfile),"r")
                 for line in b:
                     l = line.split()
-                    if l[0] not in types.keys():
-                        types[l[0]] = 1
-                    else:
-                        types[l[0]] +=1
+                    types[l[0]] +=1
 
         total = 0
         for amount in types.values():
@@ -305,67 +310,36 @@ class GUI:
             return
         self.crop_bboxes(entobox)
 
-    def crop_bboxes(self,box):
+    def crop_bboxes(self,box : EntoBox):
         
         self.get_classes()
 
-        yolo_name = os.path.join(self.label_path,box.name+".txt")
-        yolot_name = os.path.join(self.label_path,box.name+"_tags.txt")
-        if not os.path.isfile(yolo_name):
-            self.popup("Crop failed: Yolo file missing")
-            return
         
-        yolof = open(yolo_name,"r")
+        
         img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
         
 
-        dirn = os.path.join(self.source_path,"crops",box.name) + "_crops"
+        dirn = os.path.join(self.source_path,"crops",box.name)
         if os.path.exists(dirn):
             rmtree(dirn)
         os.makedirs(dirn)
 
-        cnt = {}
-        for line in yolof:
-            la = line.split(" ")[0:6]                                         
-            [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
-            [w,h] = [w*self.crop_margin,h*self.crop_margin]
-                        
-            top = max(int((y-h/2)*img.size[1]),0)
-            bottom = min(int((y+h/2)*img.size[1]),img.size[1])
-            left = max(int((x-w/2)*img.size[0]),0)
-            right = min(int((x+w/2)*img.size[0]),img.size[0])
-            
+        cnt = defaultdict(int)
+        for bbox in sorted(box.bboxes, key=lambda box : box.coord.to_list()):
+            if bbox.status != CONFIRMED and bbox.status != SURE:
+                continue
+            left, top, right, bottom = bbox.coord.to_list()          
             cropped = img.crop((left,top,right,bottom))
-            if la[0] not in cnt.keys():
-                cnt[la[0]] = 1
-            else:
-                cnt[la[0]] += 1
-            imgn = self.classes[int(la[0])]+"_"+str(cnt[la[0]])
-            cropped.save(os.path.join(dirn,imgn)+".jpg","JPEG")
-        yolof.close()
-        
-        if os.path.isfile(yolot_name):
-            yolotf = open(yolot_name,"r")
-            cnt2 = {}
-            for line in yolotf:
-                la = line.split(" ")[0:6]   
-                [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
-                [w,h] = [w*self.crop_margin,h*self.crop_margin]
-                            
-                top = max(int((y-h/2)*img.size[1]),0)
-                bottom = min(int((y+h/2)*img.size[1]),img.size[1])
-                left = max(int((x-w/2)*img.size[0]),0)
-                right = min(int((x+w/2)*img.size[0]),img.size[0])
-                
-                cropped = img.crop((left,top,right,bottom))
-                if la[0] not in cnt2.keys():
-                    cnt2[la[0]] = 1
-                else:
-                    cnt2[la[0]] += 1
-                imgn = self.classes[int(la[0])]+"_tag_"+str(cnt2[la[0]])
-                cropped.save(os.path.join(dirn,imgn)+".jpg","JPEG")
-            yolotf.close()
+            
+            cnt[bbox.label] += 1
 
+            imgn = bbox.label+"_"+str(cnt[bbox.label])
+            group_dir = dirn
+            if bbox.group != "":
+                group_dir = os.path.join(dirn, bbox.group)
+                os.makedirs(group_dir, exist_ok=True)
+            cropped.save(os.path.join(group_dir,imgn)+".jpg","JPEG")
+        
         img.close()
 
     def start(self):
@@ -388,15 +362,18 @@ class GUI:
         ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=2,padx=PADX)
         ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=2,padx=PADX)
         ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=3,padx=PADX)
-        ttk.Button(self.controls_frame,text="New box",command=self.start_draw,width=BWIDTH).grid(column=2,row=3,padx=PADX)
-        #ttk.Button(self.controls_frame,text="Add label",command=self.add_label,width=BWIDTH).grid(column=1,row=4,padx=PADX)
+        ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=3,padx=PADX)
+        ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
         ttk.Button(self.controls_frame,text="Save",command=self.save,width=BWIDTH).grid(column=2,row=6,columnspan=2, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 
-        self.root.bind("<Delete>", lambda e :self.reject_selected())
-        self.root.bind("<Return>", lambda e :self.confirm_selected())
+        self.root.bind("<Delete>", lambda e : self.reject_selected())
+        self.root.bind("<Return>", lambda e : self.confirm_selected())
+
+        self.root.bind("<Control-e>", lambda e : self.edit_mode())
+        self.root.bind("<Control-b>", lambda e : self.draw_mode())
 
     def make_thresh(self):
         self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
@@ -411,7 +388,6 @@ class GUI:
         
     def redraw_bbox(self,bbox):
         self.canvas.delete_bbox(bbox)
-        bbox.itemId = None
         self.draw_bbox(bbox)
 
     def next(self):
@@ -437,7 +413,7 @@ class GUI:
 
         self.selected = []
         self.canvas_frame.update_idletasks()
-        self.canvas = CanvasImage(self.canvas_frame, entobox)
+        self.canvas = EntoboxCanvas(self.canvas_frame, entobox)
         self.canvas.grid(column=0,row=0,sticky="nsew")
 
         # draw bboxes
@@ -479,7 +455,6 @@ class GUI:
         entobox.conf_threshold = float(val)/100
         self.set_thresh(False)
         
-    
     def set_thresh(self, update_thresh_scale = True):
         entobox : EntoBox = self.current_entobox()
         if entobox is None:
@@ -505,43 +480,11 @@ class GUI:
             if bbox.status == CONFIRMED or bbox.status == SURE:
                 cnt += 1
         self.number_label.config(text= str(cnt)+" speciments detected")
-
-
     
-        
-
-    
-
     def combine(self):
-        if len(self.selected)<2:
-            return
-        coord = self.selected[0].coord.copy()
-        for bbox in self.selected:
-            if bbox.coord[0] < coord[0]:
-                coord[0] = bbox.coord[0]
-            if bbox.coord[1] < coord[1]:
-                coord[1] = bbox.coord[1]
-            if bbox.coord[2] > coord[2]:
-                coord[2] = bbox.coord[2]
-            if bbox.coord[3] > coord[3]:
-                coord[3] = bbox.coord[3]
-        
-        entobox = self.current_entobox()
-        if entobox is None:
-            return
-        entobox.bboxes = [box for box in entobox.bboxes if box not in self.selected]
-        for bbox in self.selected:
-            self.canvas.delete(bbox.itemId)
-        self.selected = []
-        new = BBox(coord,1,entobox)
-        new.status = CONFIRMED
-        self.draw_bbox(new)
-        entobox.bboxes.append(new)    
-        self.unselect()
-        self.update_count()
+        self.canvas.combine_select_bboxes()
 
-
-    def add_label(self):
+    def group_boxes(self):
         label_window = tk.Toplevel()
         label_window.config(width=600,height=100)
         label_window.geometry('+500+500')
@@ -553,18 +496,11 @@ class GUI:
         e.focus()
 
         def conf_label(a = 0):  #dummy argument, needed to bind to <Return>
-            for bbox in self.selected:
-                bbox.label = e.get()
+            self.canvas.group_selected(e.get())
             label_window.destroy()
         
         label_window.bind('<Return>',conf_label) #<Return> is the Enter key
         ttk.Button(tfrm,text="Ok",command=conf_label).grid(row=2,column=0)
-
-
-    def start_draw(self,reason = NEW_BBOX):
-        self.drawing_reason = reason
-    def start_draw_tag(self):
-        self.start_draw(NEW_TAG)
 
 
     def get_classes(self):
@@ -590,6 +526,10 @@ class GUI:
             self.save_label.config(text="Save failed: Unvalidated boxes remaining")
             return
         """
+        entobox = self.current_entobox()
+        if entobox is None:
+            self.popup("Save failed: No image loaded")
+            return
         #uncomment to force user to confirm all incorrect bboxes
 
         if not os.path.isdir(self.label_path):
@@ -600,14 +540,8 @@ class GUI:
         self.get_classes()
         
         lf = open(os.path.join(self.label_path,"classes.txt"),"a")
-        f = open(os.path.join(self.label_path,self.entoboxes[self.current].name)+".txt","w")
+        f = open(os.path.join(self.label_path,entobox.name)+".txt","w")
         tf = None
-
-        entobox = self.current_entobox()
-        if entobox is None:
-            self.popup("Save failed: No image loaded")
-            return
-        
 
         for bbox in entobox.bboxes:
             if bbox.status in [SURE,CONFIRMED]:
@@ -633,7 +567,6 @@ class GUI:
         #self.save_label.config(text="Save Successful")
         self.popup("Save Successful")
         
-
     def popup(self,text):
         popup_window = tk.Toplevel()
         popup_window.config(width=600,height=100)
@@ -648,13 +581,6 @@ class GUI:
         
         popup_window.bind('<Return>',conf) #<Return> is the Enter key
         ttk.Button(tfrm,text="Ok",command=conf).grid(row=1,column=0)
-
-    def get_dim(self,dim):
-        x = dim[0]
-        y = dim[1]
-        self.root.update_idletasks()
-        scale = min(self.canvas.winfo_width()/x,self.canvas.winfo_height()/y)
-        return(int(x*scale),int(y*scale))
 
     def on_close(self):
         self.root.destroy()

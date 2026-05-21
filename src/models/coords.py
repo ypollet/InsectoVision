@@ -34,7 +34,10 @@ class Coords:
         return Coords(self.first.scale(width, height), self.second.scale(width, height))
     
     def to_list(self):
-        return self.first.to_list() + self.second.to_list()
+        x1, y1 = self.first.to_list()
+        x2, y2 = self.second.to_list()
+        # left, top, right, bottom
+        return [min(x1,x2), min(y1,y2), max(x1,x2), max(y1,y2)]
     
     def __str__(self):
         return f"{self.first} - {self.second}"
