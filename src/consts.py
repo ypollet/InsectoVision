@@ -29,5 +29,10 @@ COLORS =    {SURE:"chartreuse4"
 
 BWIDTH = 15 #Button width
 PADX = 0 #x axis padding between buttons/labels
+PAD_BOX = 5
+
 
 MIN_SIZE_CANVAS = 500
+WIDTH_LINE = 3
+RADIUS_CIRCLE = 4
+FONT_SCALE = 8e-3

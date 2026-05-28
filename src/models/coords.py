@@ -29,6 +29,9 @@ class Coords:
     def from_coords(x1,y1,x2,y2):
         return Coords(Point(x1, y1),Point(x2, y2))
     
+    def center(self):
+        return ((self.first.x+self.second.x)/2, (self.first.y + self.second.y)/2)
+    
     
     def scale(self, width, height):
         return Coords(self.first.scale(width, height), self.second.scale(width, height))

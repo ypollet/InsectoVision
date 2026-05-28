@@ -57,7 +57,7 @@ class EntoboxCanvas(CanvasImage):
         
         x, y = self.__ratio2image(self.canvas.canvasx(e.x), self.canvas.canvasy(e.y))
         self.rec_start = (x, y)
-        self.rec_drawn = self.canvas.create_rectangle(x,y,x,y,outline=COLORS[SELECTED],width=self.width_line)
+        self.rec_drawn = self.canvas.create_rectangle(x,y,x,y,outline=COLORS[SELECTED],width=WIDTH_LINE)
 
     def on_move_M1_held(self,e):
         if e.widget.tag_click:
@@ -129,7 +129,7 @@ class EntoboxCanvas(CanvasImage):
 
         x1, y1 = self.__ratio2canvas(x1, y1)
         x2, y2 = self.__ratio2canvas(x2, y2)
-        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=COLORS[bbox.status],width=self.width_line,tags=["bbox"])
+        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=COLORS[bbox.status],width=WIDTH_LINE,tags=["bbox"])
         self.canvas.tag_bind(boxid, '<Button-1>', lambda e: self.select_rec(boxid, e))
         self.canvas.tag_bind(boxid, '<Control-1>', lambda e: self.select_many_rec(boxid, e))
         
@@ -138,14 +138,14 @@ class EntoboxCanvas(CanvasImage):
 
         point_id_first = self.canvas.create_oval(x1, y1,
                                     x1, y1,
-                                    width=self.width_line * self.radius_circle, outline=COLORS[bbox.status])
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=COLORS[bbox.status])
         self.bind_points_events(point_id_first, boxid)
         bbox.coord.first.itemId = point_id_first
         self.points_id[point_id_first] = bbox.coord.first
 
         point_id_second = self.canvas.create_oval(x2, y2,
                                     x2, y2,
-                                    width=self.width_line * self.radius_circle, outline=COLORS[bbox.status])
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=COLORS[bbox.status])
         self.bind_points_events(point_id_second, boxid)
         bbox.coord.second.itemId = point_id_second
         self.points_id[point_id_second] = bbox.coord.second

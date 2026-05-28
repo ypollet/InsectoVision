@@ -14,15 +14,13 @@ from PIL import Image, ImageTk
 from PIL.Image import Resampling
 
 from src.components.scrollbar import AutoScrollbar 
-from src.consts import MIN_SIZE_CANVAS
+from src.consts import MIN_SIZE_CANVAS, WIDTH_LINE, RADIUS_CIRCLE
 
 
 class CanvasImage:
     """ Display and zoom image """
     def __init__(self, placeholder : ttk.Frame, path : str):
         """ Initialize the ImageFrame """
-        self.width_line = 3
-        self.radius_circle = 4
         self.imscale = 1.0  # scale for the canvas image zoom, public for outer classes
         self.__delta = 1.3  # zoom magnitude
         self.__filter = Resampling.LANCZOS  # could be: NEAREST, BILINEAR, BICUBIC and LANCZOS

@@ -14,3 +14,4 @@ runs/
 test_datasets/
 train_datasets/
 model/labels_output.pt
+test_MVC.py

@@ -6,7 +6,7 @@ from shutil import rmtree, move
 import tkinter as tk
 from tkinter import filedialog as fd
 from tkinter import ttk
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from collections import defaultdict
 
 from src.components.entobox_canvas import EntoboxCanvas
@@ -22,6 +22,7 @@ class GUI:
     drawn_bboxes = []
     selected = []
     classes = []
+    groups = ["Perigea illecta Walker, 1865","Hyphilare decisissima (Walker, 1865)", "Hyphilare hamifera (Walker, 1862)"]
     img_id = None
 
     source_path = None
@@ -316,31 +317,73 @@ class GUI:
 
         
         
-        img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
+        orig_img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
+        labeled_img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
+        draw = ImageDraw.Draw(labeled_img)
+        width, height = labeled_img.size
+        font_scale = min(width, height) * FONT_SCALE
+        font = ImageFont.load_default(font_scale)
+
         
 
         dirn = os.path.join(self.source_path,"crops",box.name)
+
         if os.path.exists(dirn):
             rmtree(dirn)
         os.makedirs(dirn)
-
+        default_boxes = os.path.join(dirn,"default")
+        os.makedirs(default_boxes)
+        
         cnt = defaultdict(int)
-        for bbox in sorted(box.bboxes, key=lambda box : box.coord.to_list()):
-            if bbox.status != CONFIRMED and bbox.status != SURE:
-                continue
-            left, top, right, bottom = bbox.coord.to_list()          
-            cropped = img.crop((left,top,right,bottom))
+
+        accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
+        sorted_bboxes = sorted(accepted_bboxes, key=lambda box : box.coord.center())
+
+        names = []
+        for bbox in sorted_bboxes:
+            bbox_name = bbox.label+"_"+str(cnt[bbox.label])
+            names.append(bbox_name)
+            left, top, right, bottom = bbox.coord.to_list()
+            cropped = orig_img.crop((left,top,right,bottom))
+
+            draw.rectangle(((left, top), (right, bottom)), outline="black", width=WIDTH_LINE*2)
             
             cnt[bbox.label] += 1
-
-            imgn = bbox.label+"_"+str(cnt[bbox.label])
-            group_dir = dirn
+            
+            group_dir = default_boxes
             if bbox.group != "":
                 group_dir = os.path.join(dirn, bbox.group)
                 os.makedirs(group_dir, exist_ok=True)
-            cropped.save(os.path.join(group_dir,imgn)+".jpg","JPEG")
+            cropped.save(os.path.join(group_dir,bbox_name)+".jpg","JPEG")
+            cropped.close()
+
+        # draw label boxes on top of everything
+        for i, bbox in enumerate(sorted_bboxes):
+            # Get the bounding box of the text itself
+            bbox_name = names[i]
+            left, top, right, bottom = bbox.coord.to_list()
+
+            left_box, top_box, right_box, lower_box = draw.textbbox((0, 0), bbox_name, font=font)
+            text_w = right_box - left_box
+            text_h = lower_box - top_box
+
+            # Position the text just above the bounding box
+            text_x = left
+            text_y = top - text_h - PAD_BOX *2
+
+            # If the label exceeds the top of the image, put it just inside the box instead
+            if text_y < 0:
+                text_y = top
+
+            # Draw a filled background rectangle for the label
+            draw.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
+
+            # Draw the text over the label background
+            draw.text((text_x + PAD_BOX, text_y), bbox_name, fill="white", font=font)
         
-        img.close()
+        labeled_img.save(os.path.join(dirn, "box_image.jpg"),"JPEG")
+        labeled_img.close()
+        orig_img.close()
 
     def start(self):
         self.make_interface()
@@ -365,7 +408,8 @@ class GUI:
         ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=3,padx=PADX)
         ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
-        ttk.Button(self.controls_frame,text="Save",command=self.save,width=BWIDTH).grid(column=2,row=6,columnspan=2, padx=PADX)
+        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=6, padx=PADX)
+        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save,width=BWIDTH).grid(column=2,row=6, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 
@@ -486,21 +530,57 @@ class GUI:
 
     def group_boxes(self):
         label_window = tk.Toplevel()
-        label_window.config(width=600,height=100)
-        label_window.geometry('+500+500')
+        label_window.configure(width=1000, height=1000)
+        label_window.geometry('+1000+1000')
         tfrm = ttk.Frame(label_window, padding=5)
         tfrm.grid()
+        tfrm.rowconfigure(2, weight=1)
         ttk.Label(tfrm,text="Enter label name").grid(row=0,column=0)
         e = ttk.Entry(tfrm)
         e.grid(row=1,column=0)
         e.focus()
 
+        tree_frame = ttk.Frame(tfrm)
+        tree_frame.grid(row=2,column=0)
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)       
+
+        tree = ttk.Treeview(tree_frame, columns=("Items",), show="headings", selectmode="browse")
+        # Add items
+        tree.heading(0, text="Existing Groups")
+        for group in self.groups:
+            tree.insert("", tk.END, values=(group,))
+
+        tree.grid(row=0, column=0)
+
+        # Create a Scrollbar
+        vert_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        vert_scroll.grid(row=0, column=1)
+        # Configure the Treeview to use the scrollbar
+        tree.configure(yscrollcommand=vert_scroll.set)
+        
+        hor_scroll = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        hor_scroll.grid(row=1, column=0)
+        # Configure the Treeview to use the scrollbar
+        tree.configure(xscrollcommand=hor_scroll.set)
+        
+        def change_group(a):
+            e.delete(0,tk.END)
+            item_id = tree.selection()[0]
+            e.insert(0, tree.item(item_id)["values"][0])
+
         def conf_label(a = 0):  #dummy argument, needed to bind to <Return>
-            self.canvas.group_selected(e.get())
+            group_label = e.get()
+            self.canvas.group_selected(group_label)
+            if not group_label in self.groups:
+                self.groups.append(group_label)
             label_window.destroy()
+
+        # Bind selection event
+        tree.bind("<<TreeviewSelect>>", change_group)
         
         label_window.bind('<Return>',conf_label) #<Return> is the Enter key
-        ttk.Button(tfrm,text="Ok",command=conf_label).grid(row=2,column=0)
+        ttk.Button(tfrm,text="Ok",command=conf_label).grid(row=3,column=0)
 
 
     def get_classes(self):
