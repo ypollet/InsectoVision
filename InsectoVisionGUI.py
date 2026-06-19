@@ -8,6 +8,8 @@ from tkinter import filedialog as fd
 from tkinter import ttk
 from PIL import Image, ImageDraw, ImageFont
 from collections import defaultdict
+import pandas as pd
+import json
 
 from src.components.entobox_canvas import EntoboxCanvas
 from src.models.boxes import BBox, EntoBox
@@ -117,7 +119,10 @@ class GUI:
     def choose_input(self):
         path = fd.askdirectory(initialdir="test_datasets")
 
-        for folder in ["images","labels","raw_ai_labels"]:
+        if not os.path.exists(os.path.join(path,"images")):
+            return
+
+        for folder in ["labels","raw_ai_labels"]:
             if not os.path.exists(os.path.join(path,folder)):
                 os.mkdir(os.path.join(path,folder))
 
@@ -280,8 +285,38 @@ class GUI:
         ttk.Button(tfrm,text="Confirm",command=conf_label).grid(row=2,column=1)
         
         param_window.focus()
-        
+    
     def summarize(self):
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
+        self.summarize_entobox(entobox)
+
+    def summarize_entobox(self,box : EntoBox):
+        entobox = self.current_entobox()
+        if entobox is None:
+            return
+        
+        self.get_classes()
+        
+        accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
+        totals = defaultdict(int)
+        groups = defaultdict(lambda : defaultdict(int))
+        for bbox in accepted_bboxes:
+            totals[bbox.label] += 1
+            group = bbox.group if bbox.group != "" else "Default"
+            groups[group][bbox.label] += 1
+
+        sf = open(os.path.join(self.source_path,"summary.csv"),"w")
+        sf.write("Group; Class; Amount\n")
+        for label in totals.keys():
+           sf.write(f"Total; {label}; {totals[label]}\n")
+        for group in groups.keys():
+            for label in groups[group].keys():
+                sf.write(f"{group}; {label}; {groups[group][label]}\n")
+        sf.close()
+
+    def summarize_from_label_files(self):
         
         types = defaultdict(int)
         self.get_classes()
@@ -331,7 +366,7 @@ class GUI:
         if os.path.exists(dirn):
             rmtree(dirn)
         os.makedirs(dirn)
-        default_boxes = os.path.join(dirn,"default")
+        default_boxes = os.path.join(dirn,"Default")
         os.makedirs(default_boxes)
         
         cnt = defaultdict(int)
@@ -339,23 +374,31 @@ class GUI:
         accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
         sorted_bboxes = sorted(accepted_bboxes, key=lambda box : box.coord.center())
 
+        groups = defaultdict(lambda : defaultdict(lambda : defaultdict()))
+
         names = []
         for bbox in sorted_bboxes:
-            bbox_name = bbox.label+"_"+str(cnt[bbox.label])
+            cnt[bbox.label] += 1
+            bbox_name = bbox.label+"_"+str('{:03}'.format(cnt[bbox.label]))
             names.append(bbox_name)
             left, top, right, bottom = bbox.coord.to_list()
             cropped = orig_img.crop((left,top,right,bottom))
 
-            draw.rectangle(((left, top), (right, bottom)), outline="black", width=WIDTH_LINE*2)
+            draw.rectangle(((left, top), (right, bottom)), outline="green", width=WIDTH_LINE*3)
             
-            cnt[bbox.label] += 1
             
+            
+            group_label = "Default"
             group_dir = default_boxes
             if bbox.group != "":
+                group_label = bbox.group
                 group_dir = os.path.join(dirn, bbox.group)
                 os.makedirs(group_dir, exist_ok=True)
-            cropped.save(os.path.join(group_dir,bbox_name)+".jpg","JPEG")
+            os.makedirs(os.path.join(group_dir,bbox_name), exist_ok=True)
+            cropped.save(os.path.join(group_dir,bbox_name,bbox_name)+".jpg","JPEG")
             cropped.close()
+
+            groups[group_label][bbox_name] = bbox.coord.center()
 
         # draw label boxes on top of everything
         for i, bbox in enumerate(sorted_bboxes):
@@ -381,9 +424,24 @@ class GUI:
             # Draw the text over the label background
             draw.text((text_x + PAD_BOX, text_y), bbox_name, fill="white", font=font)
         
+        group_list = list()
+        i = 0
+        for group in sorted(groups.keys()):
+            for bbox_name in sorted(groups[group].keys()):
+                group_list.append({
+                    "Group": group,
+                    "Name" : bbox_name,
+                    "X" : groups[group][bbox_name][0] / box.width,
+                    "Y" : groups[group][bbox_name][1] / box.height
+                })
+        group_df = pd.DataFrame(data=group_list,columns=["Group", "Name", "X", "Y"])
+                
+        group_df.to_csv(os.path.join(dirn, "summary_crops.csv"), sep=";", index=False)
         labeled_img.save(os.path.join(dirn, "box_image.jpg"),"JPEG")
         labeled_img.close()
         orig_img.close()
+
+        self.summarize_entobox(box)
 
     def start(self):
         self.make_interface()
@@ -606,7 +664,7 @@ class GUI:
             self.save_label.config(text="Save failed: Unvalidated boxes remaining")
             return
         """
-        entobox = self.current_entobox()
+        entobox : EntoBox = self.current_entobox()
         if entobox is None:
             self.popup("Save failed: No image loaded")
             return
@@ -619,30 +677,48 @@ class GUI:
 
         self.get_classes()
         
-        lf = open(os.path.join(self.label_path,"classes.txt"),"a")
-        f = open(os.path.join(self.label_path,entobox.name)+".txt","w")
-        tf = None
+        class_file = open(os.path.join(self.label_path,"classes.txt"),"a")
+        yolo_file = open(os.path.join(self.label_path,entobox.name+".txt"),"w")
+        save_file = open(os.path.join(self.label_path,entobox.name+".json"),"w")
+        boxes = list() 
 
-        for bbox in entobox.bboxes:
-            if bbox.status in [SURE,CONFIRMED]:
+        bboxes_not_rejected = filter(lambda bbox : bbox.status != REJECTED, entobox.bboxes)
+        sorted_bboxes : list[BBox] = sorted(bboxes_not_rejected, key=lambda box : box.coord.center())
+        cnt = defaultdict(int)
+
+        i = 0
+        for bbox in sorted_bboxes:
+            i +=1
+            bbox_name = f"{bbox.label}_{i}"
+            if bbox.status == CONFIRMED or bbox.status == SURE:
+                cnt[bbox.label] += 1
+                bbox_name = bbox.label+"_"+str(cnt[bbox.label])
                 if bbox.label not in self.classes:
-                    lf.write(bbox.label+"\n")
+                    class_file.write(bbox.label+"\n")
                     self.classes.append(bbox.label)
                 cnum = self.classes.index(bbox.label)
-                f.write(str(cnum)+" "+" ".join(str(x) for x in bbox.to_yolo(entobox.width, entobox.height))+ "\n")
+                # Write only accepted bbox to yolo file
+                yolo_file.write(str(cnum)+" "+" ".join(str(x) for x in bbox.to_yolo(entobox.width, entobox.height))+ "\n")
+            boxes.append({
+                "name" : bbox_name,
+                "group" : bbox.group,
+                "label" : bbox.label,
+                "conf" : bbox.conf,
+                "position" : bbox.to_yolo(entobox.width, entobox.height)
+            })
+        
+        save_json = {
+            "image" : entobox.image,
+            "width" : entobox.width,
+            "height" : entobox.height,
+            "bboxes" : boxes
+        }
+        
+        json.dump(save_json, save_file, indent=3)
 
-            elif bbox.status == TAG: #Write tags to a separate yolo file with the same class system (can be used for tag detection training)
-                if tf is None:
-                    tf = open(os.path.join(self.label_path,entobox.name)+"_tags.txt","w")
-                if bbox.label not in self.classes:
-                    lf.write(bbox.label+"\n")
-                    self.classes.append(bbox.label)
-                cnum = self.classes.index(bbox.label)
-                tf.write(str(cnum)+" "+" ".join(str(x) for x in bbox.to_yolo())+ "\n") 
-
-        f.close()
-        if tf != None: tf.close()
-        lf.close()
+        yolo_file.close()
+        save_file.close()
+        class_file.close()
 
         #self.save_label.config(text="Save Successful")
         self.popup("Save Successful")
