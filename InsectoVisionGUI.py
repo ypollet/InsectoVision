@@ -344,6 +344,7 @@ class GUI:
         entobox = self.current_entobox()
         if entobox is None:
             return
+        self.save()
         self.crop_bboxes(entobox)
 
     def crop_bboxes(self,box : EntoBox):
@@ -619,6 +620,7 @@ class GUI:
         
         hor_scroll = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
         hor_scroll.grid(row=1, column=0)
+        hor_scroll.unbind("Ctrl")
         # Configure the Treeview to use the scrollbar
         tree.configure(xscrollcommand=hor_scroll.set)
         
