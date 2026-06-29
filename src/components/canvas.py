@@ -299,13 +299,13 @@ class CanvasImage:
         else:
             self.__previous_state = event.state  # remember the last keystroke state
             # Up, Down, Left, Right keystrokes
-            if event.keycode in [68, 39, 102]:  # scroll right: keys 'D', 'Right' or 'Numpad-6'
+            if event.keysym_num in [ord('d'), 65363, ord('6')]:  # scroll right: keys 'D', 'Right' or 'Numpad-6'
                 self.__scroll_x('scroll',  1, 'unit', event=event)
-            elif event.keycode in [65, 37, 100]:  # scroll left: keys 'A', 'Left' or 'Numpad-4'
+            elif event.keysym_num in [ord('q'), 65361, ord('4')]:  # scroll left: keys 'A', 'Left' or 'Numpad-4'
                 self.__scroll_x('scroll', -1, 'unit', event=event)
-            elif event.keycode in [87, 38, 104]:  # scroll up: keys 'W', 'Up' or 'Numpad-8'
+            elif event.keysym_num in [ord('z'), 65362, ord('8')]:  # scroll up: keys 'W', 'Up' or 'Numpad-8'
                 self.__scroll_y('scroll', -1, 'unit', event=event)
-            elif event.keycode in [83, 40, 98]:  # scroll down: keys 'S', 'Down' or 'Numpad-2'
+            elif event.keysym_num in [ord('d'), 65364, ord('2')]:  # scroll down: keys 'S', 'Down' or 'Numpad-2'
                 self.__scroll_y('scroll',  1, 'unit', event=event)
 
     def crop(self, bbox):

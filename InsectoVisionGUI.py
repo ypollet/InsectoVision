@@ -344,8 +344,13 @@ class GUI:
         entobox = self.current_entobox()
         if entobox is None:
             return
-        self.save()
+        self.save(entobox)
         self.crop_bboxes(entobox)
+
+    def crop_all_images(self):
+        for entobox in self.entoboxes:
+            self.save(entobox)
+            self.crop_bboxes(entobox)
 
     def crop_bboxes(self,box : EntoBox):
         
@@ -355,7 +360,9 @@ class GUI:
         
         orig_img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
         labeled_img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
-        draw = ImageDraw.Draw(labeled_img)
+        label_no_box_img = Image.open(os.path.join(self.img_path,box.name+".jpg"))
+        draw_bbox = ImageDraw.Draw(labeled_img)
+        draw_label = ImageDraw.Draw(label_no_box_img)
         width, height = labeled_img.size
         font_scale = min(width, height) * FONT_SCALE
         font = ImageFont.load_default(font_scale)
@@ -373,7 +380,7 @@ class GUI:
         cnt = defaultdict(int)
 
         accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
-        sorted_bboxes = sorted(accepted_bboxes, key=lambda box : box.coord.center())
+        sorted_bboxes = self.sort_bboxes_by_columns(accepted_bboxes, image_width=box.width)
 
         groups = defaultdict(lambda : defaultdict(lambda : defaultdict()))
 
@@ -385,7 +392,7 @@ class GUI:
             left, top, right, bottom = bbox.coord.to_list()
             cropped = orig_img.crop((left,top,right,bottom))
 
-            draw.rectangle(((left, top), (right, bottom)), outline="green", width=WIDTH_LINE*3)
+            draw_bbox.rectangle(((left, top), (right, bottom)), outline="green", width=WIDTH_LINE*3)
             
             
             
@@ -406,8 +413,10 @@ class GUI:
             # Get the bounding box of the text itself
             bbox_name = names[i]
             left, top, right, bottom = bbox.coord.to_list()
+            center_w = (right+left)/2
+            center_h = (bottom+top)/2
 
-            left_box, top_box, right_box, lower_box = draw.textbbox((0, 0), bbox_name, font=font)
+            left_box, top_box, right_box, lower_box = draw_bbox.textbbox((0, 0), bbox_name, font=font)
             text_w = right_box - left_box
             text_h = lower_box - top_box
 
@@ -415,15 +424,20 @@ class GUI:
             text_x = left
             text_y = top - text_h - PAD_BOX *2
 
+            center_x = center_w - text_w/2 - PAD_BOX
+            center_y = center_h - text_h/2 - PAD_BOX
+
             # If the label exceeds the top of the image, put it just inside the box instead
             if text_y < 0:
                 text_y = top
 
             # Draw a filled background rectangle for the label
-            draw.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
+            draw_bbox.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
+            draw_label.rectangle([center_x, center_y, center_x + text_w + PAD_BOX*2, text_h + center_h + PAD_BOX*2], fill="black")
 
             # Draw the text over the label background
-            draw.text((text_x + PAD_BOX, text_y), bbox_name, fill="white", font=font)
+            draw_bbox.text((text_x + PAD_BOX, text_y), bbox_name, fill="white", font=font)
+            draw_label.text((center_x + PAD_BOX, center_y), bbox_name, fill="white", font=font)
         
         group_list = list()
         i = 0
@@ -439,6 +453,7 @@ class GUI:
                 
         group_df.to_csv(os.path.join(dirn, "summary_crops.csv"), sep=";", index=False)
         labeled_img.save(os.path.join(dirn, "box_image.jpg"),"JPEG")
+        label_no_box_img.save(os.path.join(dirn, "label_image.jpg"),"JPEG")
         labeled_img.close()
         orig_img.close()
 
@@ -468,7 +483,8 @@ class GUI:
         ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
         ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=6, padx=PADX)
-        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save,width=BWIDTH).grid(column=2,row=6, padx=PADX)
+        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=6, padx=PADX)
+        ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=7, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 
@@ -580,7 +596,7 @@ class GUI:
             return
         cnt = 0
         for bbox in entobox.bboxes:
-            if bbox.status == CONFIRMED or bbox.status == SURE:
+            if bbox.status == CONFIRMED or bbox.conf == SURE:
                 cnt += 1
         self.number_label.config(text= str(cnt)+" speciments detected")
     
@@ -654,8 +670,62 @@ class GUI:
             for line in lf:
                 self.classes.append(line.strip("\n"))
             lf.close()
+
+    def sort_bboxes_by_columns(self, bboxes, image_width=None):
+        """Group bboxes into columns (left-to-right) and sort each column by vertical position.
+
+        bboxes: iterable of BBox
+        image_width: optional image width to compute tolerance for column grouping
+        """
+        boxes = list(bboxes)
+        if not boxes:
+            return []
+
+        centers = []
+        for bb in boxes:
+            cx, cy = bb.coord.center()
+            left, top, right, bottom = bb.coord.to_list()
+            bw = right - left
+            centers.append((bb, cx, cy, bw))
+
+        centers.sort(key=lambda x: x[1])  # sort by center x
+
+        avg_bw = sum(c[3] for c in centers) / len(centers)
+        tol = max(avg_bw * 0.6, (image_width or boxes[0].parent.width) / 20)
+
+        columns = []
+        for b, cx, cy, bw in centers:
+            best_col = None
+            best_dist = None
+            for col in columns:
+                dist = abs(cx - col['mean_x'])
+                if dist <= tol and (best_dist is None or dist < best_dist):
+                    best_dist = dist
+                    best_col = col
+            if best_col is None:
+                columns.append({'mean_x': cx, 'boxes': [(b, cx, cy)]})
+            else:
+                best_col['boxes'].append((b, cx, cy))
+                xs = [it[1] for it in best_col['boxes']]
+                best_col['mean_x'] = sum(xs) / len(xs)
+
+        columns.sort(key=lambda c: c['mean_x'])
+
+        result = []
+        for col in columns:
+            col['boxes'].sort(key=lambda it: it[2])  # sort by center y
+            result.extend([it[0] for it in col['boxes']])
+
+        return result
+
+    def save_current(self):
+        entobox : EntoBox = self.current_entobox()
+        if entobox is None:
+            self.popup("Save failed: No image loaded")
+            return
+        self.save(entobox)
             
-    def save(self):
+    def save(self, entobox):
         """
         missing = False
         for bbox in self.entoboxes[self.current].bboxes:
@@ -666,10 +736,7 @@ class GUI:
             self.save_label.config(text="Save failed: Unvalidated boxes remaining")
             return
         """
-        entobox : EntoBox = self.current_entobox()
-        if entobox is None:
-            self.popup("Save failed: No image loaded")
-            return
+        
         #uncomment to force user to confirm all incorrect bboxes
 
         if not os.path.isdir(self.label_path):
@@ -685,14 +752,14 @@ class GUI:
         boxes = list() 
 
         bboxes_not_rejected = filter(lambda bbox : bbox.status != REJECTED, entobox.bboxes)
-        sorted_bboxes : list[BBox] = sorted(bboxes_not_rejected, key=lambda box : box.coord.center())
+        sorted_bboxes : list[BBox] = self.sort_bboxes_by_columns(bboxes_not_rejected, image_width=entobox.width)
         cnt = defaultdict(int)
 
         i = 0
         for bbox in sorted_bboxes:
             i +=1
             bbox_name = f"{bbox.label}_{i}"
-            if bbox.status == CONFIRMED or bbox.status == SURE:
+            if bbox.status == CONFIRMED or bbox.conf >= entobox.conf_threshold:
                 cnt[bbox.label] += 1
                 bbox_name = bbox.label+"_"+str(cnt[bbox.label])
                 if bbox.label not in self.classes:

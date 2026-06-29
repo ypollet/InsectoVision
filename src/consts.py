@@ -4,7 +4,7 @@ import os
 DEFAULT_LABEL = "Insect"
 DEFAULT_MODEL = os.path.join("model","final_23.pt")
 
-DEFAULT_CONF = 0.85
+DEFAULT_CONF = 0.35
 
 #Drawing reasons
 NEW_BBOX = 1
