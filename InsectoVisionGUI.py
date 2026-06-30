@@ -24,7 +24,7 @@ class GUI:
     drawn_bboxes = []
     selected = []
     classes = []
-    groups = ["Perigea illecta Walker, 1865","Hyphilare decisissima (Walker, 1865)", "Hyphilare hamifera (Walker, 1862)"]
+    groups = []
     img_id = None
 
     source_path = None
@@ -180,8 +180,8 @@ class GUI:
         need_inf = False
 
         for entry in names:
+            # TODO : select images that are not only .jpg
             if(entry.endswith(".jpg")):
-
                 img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
                     self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.label_path))
@@ -411,7 +411,7 @@ class GUI:
         # draw label boxes on top of everything
         for i, bbox in enumerate(sorted_bboxes):
             # Get the bounding box of the text itself
-            bbox_name = names[i]
+            bbox_name = names[i].split('_')[-1]
             left, top, right, bottom = bbox.coord.to_list()
             center_w = (right+left)/2
             center_h = (bottom+top)/2
@@ -432,12 +432,13 @@ class GUI:
                 text_y = top
 
             # Draw a filled background rectangle for the label
-            draw_bbox.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
+            #draw_bbox.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
             draw_label.rectangle([center_x, center_y, center_x + text_w + PAD_BOX*2, text_h + center_h + PAD_BOX*2], fill="black")
 
             # Draw the text over the label background
-            draw_bbox.text((text_x + PAD_BOX, text_y), bbox_name, fill="white", font=font)
+            draw_bbox.text((text_x, text_y), bbox_name, fill="red", font=font)
             draw_label.text((center_x + PAD_BOX, center_y), bbox_name, fill="white", font=font)
+
         
         group_list = list()
         i = 0
@@ -761,7 +762,7 @@ class GUI:
             bbox_name = f"{bbox.label}_{i}"
             if bbox.status == CONFIRMED or bbox.conf >= entobox.conf_threshold:
                 cnt[bbox.label] += 1
-                bbox_name = bbox.label+"_"+str(cnt[bbox.label])
+                bbox_name = bbox.label+"_"+str('{:03}'.format(cnt[bbox.label]))
                 if bbox.label not in self.classes:
                     class_file.write(bbox.label+"\n")
                     self.classes.append(bbox.label)
@@ -780,6 +781,7 @@ class GUI:
             "image" : entobox.image,
             "width" : entobox.width,
             "height" : entobox.height,
+            "conf": entobox.conf_threshold,
             "bboxes" : boxes
         }
         
