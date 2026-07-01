@@ -1,10 +1,11 @@
 #Constants
 import os
+from enum import Flag, auto
 
 DEFAULT_LABEL = "Insect"
-DEFAULT_MODEL = os.path.join("model","final_23.pt")
+DEFAULT_MODEL = os.path.join("model","rbins.pt")
 
-DEFAULT_CONF = 0.35
+DEFAULT_CONF = 0.85
 
 #Drawing reasons
 NEW_BBOX = 1
@@ -12,18 +13,21 @@ NEW_TAG = 2
 SELECTING = 3
 
 #Bbox status
-SURE=1          #AI's confidence is above threshold
-DOUBT=2         #AI's confidence is below threshold
-CONFIRMED=3     #User has confirmed the bbox is correct
-REJECTED=4      #User has confirmed the bbox is incorrect
-SELECTED=5      #Currently selected
-TAG=6           #User defined paper tag (saved in a separate yolo file, ignored in summary or count)
-COLORS =    {SURE:"chartreuse4"
-            ,DOUBT:"gold"
-            ,CONFIRMED:"green2"
-            ,REJECTED:"red"
-            ,SELECTED:"blue"
-            ,TAG:"purple"
+class Status(Flag):
+    SELECTED=auto()     #User has selected the bbox
+    REJECTED=auto()     #User has confirmed the bbox is incorrect
+    DOUBT=auto()        #AI's confidence is below threshold
+    SURE=auto()         #AI's confidence is above threshold
+    CONFIRMED=auto()    #User has confirmed the bbox is correct
+    ACCEPTED = SURE | CONFIRMED
+    NO_UPDATE = REJECTED | CONFIRMED
+
+COLORS =    {
+                Status.SURE:"chartreuse4",
+                Status.DOUBT:"gold",
+                Status.CONFIRMED:"green2",
+                Status.REJECTED:"red",
+                Status.SELECTED:"blue",
             }
 
 

@@ -1,4 +1,5 @@
 import os
+import json
 from src.models.coords import Coords
 from src.consts import *
 from wand.image import Image
@@ -28,6 +29,21 @@ class EntoBox:
 
 
     def get_bboxes(self,bboxes_path):
+        if(os.path.isfile(os.path.join(bboxes_path,self.name+".json"))):
+            with open(os.path.join(bboxes_path,self.name+".json"), "r") as f:
+                bboxes_dict = json.load(f)
+            self.conf_threshold = bboxes_dict["conf"]
+            for bbox in bboxes_dict["bboxes"]:
+                
+                [x,y,w,h] = bbox["position"]
+                x1 = (x-w/2)*self.width
+                x2 = (x+w/2)*self.width
+                y1 = (y-h/2)*self.height
+                y2 = (y+h/2)*self.height
+
+                self.bboxes.append(BBox([x1,y1,x2,y2],parent=self, conf=bbox["conf"], group=bbox["group"], label=bbox["label"]))
+                
+            return
         if(os.path.isfile(os.path.join(bboxes_path,self.name+".txt"))):
             self.bboxes = []
             txt = open(os.path.join(bboxes_path,self.name+".txt"))
@@ -49,16 +65,29 @@ class EntoBox:
 
 class BBox:
 
-    status = DOUBT
-    itemId = None
-    label = DEFAULT_LABEL
-    group = ""
-
-    def __init__(self,coord,conf : float,parent : EntoBox):
+    def __init__(self,coord,conf : float,parent : EntoBox, label : str = DEFAULT_LABEL, group : str = ""):
         self.parent : EntoBox = parent
+
+        self.itemId = None
+        self.label = label
+        self.group = group
+        
         self.coord : Coords = Coords.from_coords(*coord)
         self.conf : float = conf
         self.is_selected = False
+
+    def status(self):
+        if self.is_selected:
+            return Status.SELECTED
+        if self.conf == 1:
+            return Status.CONFIRMED
+        if self.conf == 0:
+            return Status.REJECTED
+        return Status.SURE if (self.conf >= self.parent.conf_threshold) else Status.DOUBT
+
+    def color(self):
+        return COLORS[self.status()]
+
 
     def to_yolo(self, width, height):
         x1, y1, x2, y2 = self.coord.to_list()
@@ -69,12 +98,4 @@ class BBox:
         h = float(abs(y2-y1))/ height
 
         return [x,y,w,h]
-    
-
-    def update_status(self,ct):
-        if self.status in [None,DOUBT,SURE]:
-            if(self.conf < ct):
-                self.status = DOUBT
-            else:
-                self.status = SURE
 

@@ -117,7 +117,7 @@ class GUI:
             self.canvas.set_to_selecting()
 
     def choose_input(self):
-        path = fd.askdirectory(initialdir="test_datasets")
+        path = fd.askdirectory(initialdir="~/Elliot")
 
         if not os.path.exists(os.path.join(path,"images")):
             return
@@ -299,7 +299,7 @@ class GUI:
         
         self.get_classes()
         
-        accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
+        accepted_bboxes = filter(lambda bbox : bbox.status() == Status.CONFIRMED or bbox.status() == Status.SURE, box.bboxes) # Get only accepted bboxes
         totals = defaultdict(int)
         groups = defaultdict(lambda : defaultdict(int))
         for bbox in accepted_bboxes:
@@ -379,7 +379,7 @@ class GUI:
         
         cnt = defaultdict(int)
 
-        accepted_bboxes = filter(lambda bbox : bbox.status == CONFIRMED or bbox.status == SURE, box.bboxes) # Get only accepted bboxes
+        accepted_bboxes = filter(lambda bbox : bbox.status() in Status.ACCEPTED, box.bboxes) # Get only accepted bboxes
         sorted_bboxes = self.sort_bboxes_by_columns(accepted_bboxes, image_width=box.width)
 
         groups = defaultdict(lambda : defaultdict(lambda : defaultdict()))
@@ -433,11 +433,11 @@ class GUI:
 
             # Draw a filled background rectangle for the label
             #draw_bbox.rectangle([text_x, text_y, text_x + text_w + PAD_BOX*2, text_y + text_h + PAD_BOX*2], fill="black")
-            draw_label.rectangle([center_x, center_y, center_x + text_w + PAD_BOX*2, text_h + center_h + PAD_BOX*2], fill="black")
+            draw_label.rectangle([center_x, center_y, center_x + text_w + PAD_BOX*2, text_h + center_h + PAD_BOX*2], fill="white")
 
             # Draw the text over the label background
             draw_bbox.text((text_x, text_y), bbox_name, fill="red", font=font)
-            draw_label.text((center_x + PAD_BOX, center_y), bbox_name, fill="white", font=font)
+            draw_label.text((center_x + PAD_BOX, center_y), bbox_name, fill="red", font=font)
 
         
         group_list = list()
@@ -499,7 +499,7 @@ class GUI:
         self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
         self.thresh_label.grid(column=1,row=5,padx=PADX)
 
-        self.thresh_scale = ttk.Scale(self.controls_frame, from_=0,to=100,command=self.update_thresh)
+        self.thresh_scale = ttk.Scale(self.controls_frame, from_=1,to=100,command=self.update_thresh)
         self.thresh_scale.grid(column=2,row=5,padx=PADX)
         self.thresh_scale.set(100*DEFAULT_CONF)
     
@@ -519,6 +519,7 @@ class GUI:
     def set_index(self, n : int):
         
         if self.n_img == 0:
+            self.current = 0
             return
         self.current = (n + self.n_img) % self.n_img #Wraps around when going next/previous
         self.show_image()
@@ -582,9 +583,8 @@ class GUI:
         self.thresh_label.config(text= f"Confidence threshold: {int(entobox.conf_threshold*100)}%")
 
         for bbox in entobox.bboxes:
-            if bbox.status == REJECTED or bbox.status == CONFIRMED:
+            if bbox.status() in Status.NO_UPDATE:
                 continue
-            bbox.update_status(entobox.conf_threshold)
             self.canvas.update_bbox_color(bbox)
         #self.set_index(self.current) #Redraws current entobox 
         if update_thresh_scale:
@@ -597,7 +597,7 @@ class GUI:
             return
         cnt = 0
         for bbox in entobox.bboxes:
-            if bbox.status == CONFIRMED or bbox.conf == SURE:
+            if bbox.status() in Status.ACCEPTED:
                 cnt += 1
         self.number_label.config(text= str(cnt)+" speciments detected")
     
@@ -692,7 +692,7 @@ class GUI:
         centers.sort(key=lambda x: x[1])  # sort by center x
 
         avg_bw = sum(c[3] for c in centers) / len(centers)
-        tol = max(avg_bw * 0.6, (image_width or boxes[0].parent.width) / 20)
+        tol = max(avg_bw * 0.8, (image_width or boxes[0].parent.width) / 20)
 
         columns = []
         for b, cx, cy, bw in centers:
@@ -730,7 +730,7 @@ class GUI:
         """
         missing = False
         for bbox in self.entoboxes[self.current].bboxes:
-            if bbox.status == DOUBT:
+            if bbox.status() == Status.DOUBT:
                 missing = True
                 break
         if missing:
@@ -752,7 +752,7 @@ class GUI:
         save_file = open(os.path.join(self.label_path,entobox.name+".json"),"w")
         boxes = list() 
 
-        bboxes_not_rejected = filter(lambda bbox : bbox.status != REJECTED, entobox.bboxes)
+        bboxes_not_rejected = filter(lambda bbox : bbox.status() != Status.REJECTED, entobox.bboxes)
         sorted_bboxes : list[BBox] = self.sort_bboxes_by_columns(bboxes_not_rejected, image_width=entobox.width)
         cnt = defaultdict(int)
 
@@ -760,7 +760,7 @@ class GUI:
         for bbox in sorted_bboxes:
             i +=1
             bbox_name = f"{bbox.label}_{i}"
-            if bbox.status == CONFIRMED or bbox.conf >= entobox.conf_threshold:
+            if bbox.status() in Status.ACCEPTED:
                 cnt[bbox.label] += 1
                 bbox_name = bbox.label+"_"+str('{:03}'.format(cnt[bbox.label]))
                 if bbox.label not in self.classes:
