@@ -118,7 +118,7 @@ class GUI:
             self.canvas.set_to_selecting()
 
     def choose_input(self):
-        path = fd.askdirectory(initialdir="~/Elliot")
+        path = fd.askdirectory(initialdir="test_datasets/")
 
         if not os.path.exists(os.path.join(path,"images")):
             return
@@ -180,12 +180,7 @@ class GUI:
 
         need_inf = False
 
-<<<<<<< HEAD
-        for entry in names:
-            # TODO : select images that are not only .jpg
-=======
         for entry in sorted(names):
->>>>>>> 84ef3b6 (Feat : StringVar for dataset)
             if(entry.endswith(".jpg")):
                 img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
