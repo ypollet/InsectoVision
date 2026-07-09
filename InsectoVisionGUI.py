@@ -6,6 +6,7 @@ from shutil import rmtree, move
 import tkinter as tk
 from tkinter import filedialog as fd
 from tkinter import ttk
+from tkinter import StringVar
 from PIL import Image, ImageDraw, ImageFont
 from collections import defaultdict
 import pandas as pd
@@ -179,8 +180,12 @@ class GUI:
 
         need_inf = False
 
+<<<<<<< HEAD
         for entry in names:
             # TODO : select images that are not only .jpg
+=======
+        for entry in sorted(names):
+>>>>>>> 84ef3b6 (Feat : StringVar for dataset)
             if(entry.endswith(".jpg")):
                 img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
@@ -471,7 +476,8 @@ class GUI:
 
     def make_interface(self):
         #Title and buttons
-        self.title_label = ttk.Label(self.controls_frame, text="Image "+str(self.current+1)+" /"+str(self.n_img))
+        self.title_label_text = StringVar(value="Image "+str(self.current+1)+" /"+str(self.n_img))
+        self.title_label = ttk.Label(self.controls_frame, textvariable=self.title_label_text)
         self.title_label.grid(column=1, row=0)
         self.number_label = ttk.Label(self.controls_frame, text= str(len(self.current_entobox().bboxes) if self.current_entobox() else 0)+" speciments detected",width=23)
         self.number_label.grid(column=2,row=0)
@@ -530,7 +536,7 @@ class GUI:
         entobox : EntoBox = self.current_entobox()
 
         self.save_label.config(text="")
-        self.title_label.config(text="Image "+str(self.current+1)+" /"+str(self.n_img))
+        self.title_label_text.set("Image "+str(self.current+1)+" /"+str(self.n_img))
 
         self.selected = []
         self.canvas_frame.update_idletasks()
