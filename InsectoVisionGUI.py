@@ -617,7 +617,6 @@ class GUI:
         self.canvas.combine_select_bboxes()
 
     def group_boxes(self):
-        print(self.current_entobox().groups)
         label_window = GroupTopup(self.current_entobox().groups, self.set_group_label)
     
     def set_group_label(self, group_label):  #dummy argument, needed to bind to <Return>
