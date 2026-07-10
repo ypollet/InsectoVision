@@ -4,6 +4,7 @@ import argparse
 import os
 import cv2
 import numpy as np
+
 from PIL import Image
 from ultralytics import YOLO
 import api
@@ -68,6 +69,7 @@ def main(args):
 
         # Run detection on each ensemble model
         for model in to_be_ensembled:
+            
             results = model.predict(source=image, conf=args.conf, imgsz=args.img_size, iou=args.max_overlap,
                                     max_det=1000, verbose=args.verbose)
             pred = api.store_predictions(results)
@@ -76,7 +78,7 @@ def main(args):
 
             # Apply optional non-ML filtering
             if not args.no_filtering:
-                pred = api.remove_overlapping_regions(pred)
+                pred = api.remove_overlapping_regions(pred, args.max_overlap)
                 pred = api.filter_bboxes_zscore(pred)
             pred_list.extend(pred)
 

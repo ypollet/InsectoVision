@@ -127,6 +127,7 @@ def max_uncertainty(dataset, model, sample_size, aggregate):
     """
     images_dir = os.path.join(dataset, "images")
     imgs = api.get_images(images_dir)
+
     sys.argv = f"inference_pipeline.py --input_folder {images_dir} --model {model} " \
                f"--detection_only --silent --write_conf".split()
     args = inference_pipeline.parse_args()

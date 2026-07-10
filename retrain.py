@@ -63,7 +63,7 @@ def main(args):
         # Construct arguments for high-precision fine-tuning using the new model and classifier
         training_args = f"training_pipeline.py --dataset new_dataset --fine_tuning_steps {new_steps} " \
                         f"--model new_model.pt --heatmap_extractor new_model.keras --lr0 {args.original_lr0 * factor} " \
-                        f"--epochs {new_epochs} --batch_init {args.original_batch} " \
+                        f"--epochs {new_epochs} --batch_init {args.original_batch} --img_size {args.img_size} " \
                         f"--replace_all --patience {max(new_epochs // 3, 2)} --no_split".split()
         if args.verbose:
             training_args.append("--verbose")
@@ -104,8 +104,8 @@ def parse_args():
     parser.add_argument(
         "--gpu",
         type=str,
-        default="mps",
-        help="Gpu to use, the default is the macos standard (default: mps)"
+        default="cuda:0",
+        help="Gpu to use, the default is the macos standard (default: cuda:0)"
     )
     parser.add_argument(
         "--original_lr0",
@@ -130,6 +130,12 @@ def parse_args():
         type=int,
         default=23,
         help="Initial number of fine-tuning steps which was used to train the input model (default: 10)"
+    )
+    parser.add_argument(
+        "--img_size",
+        type=int,
+        default=640,
+        help="Detector's input image size (default: 640)"
     )
     parser.add_argument(
         "--verbose",

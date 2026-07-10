@@ -182,6 +182,7 @@ class GUI:
         need_inf = False
 
         for entry in sorted(names):
+            # TODO : select images that are not only .jpg
             if(entry.endswith(".jpg")):
                 img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
@@ -490,7 +491,7 @@ class GUI:
 
         ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=6, padx=PADX)
         ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=6, padx=PADX)
-        ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=7, padx=PADX)
+        #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=7, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 

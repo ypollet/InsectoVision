@@ -3,7 +3,7 @@ import os
 from enum import Flag, auto
 
 DEFAULT_LABEL = "Insect"
-DEFAULT_MODEL = os.path.join("model","rbins.pt")
+DEFAULT_MODEL = os.path.join("model","rbins_overlap.pt")
 
 DEFAULT_CONF = 0.85
 
