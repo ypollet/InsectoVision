@@ -13,6 +13,8 @@ import pandas as pd
 import json
 
 from src.components.entobox_canvas import EntoboxCanvas
+from src.components.entobox_list import EntoboxList, EntoboxItem
+from src.components.groups_topup import GroupTopup
 from src.models.boxes import BBox, EntoBox
 from src.consts import *
 
@@ -25,7 +27,6 @@ class GUI:
     drawn_bboxes = []
     selected = []
     classes = []
-    groups = []
     img_id = None
 
     source_path = None
@@ -174,7 +175,7 @@ class GUI:
         if(not self.started):
            self.start()
 
-        self.entoboxes = []
+        self.entoboxes : list[EntoBox] = []
         if names is None:
             names = os.listdir(self.img_path)
 
@@ -184,7 +185,7 @@ class GUI:
             if(entry.endswith(".jpg")):
                 img_path = os.path.join(self.img_path,entry)
                 if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.label_path))
+                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.label_path, is_saved=True))
 
                 elif(os.path.exists(os.path.join(self.source_path,"raw_ai_labels",entry[:len(entry)-4]+".txt"))):
                     self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.raw_path))
@@ -195,7 +196,9 @@ class GUI:
         
         self.n_img = len(self.entoboxes)
 
-
+        # Reset image_tree 
+        self.entobox_list.reset()
+        self.entobox_list.add_items(self.entoboxes)
         
         self.current = 0
         self.set_index(0)
@@ -203,7 +206,7 @@ class GUI:
         return need_inf
 
     def run_inference(self):
-        sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent","--model"]
+        sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent","--model", "--img_sz", 960]
         sys.argv.append(self.model)
         if self.detection_only: 
             sys.argv.append("--detection_only")
@@ -299,7 +302,7 @@ class GUI:
         
         self.get_classes()
         
-        accepted_bboxes = filter(lambda bbox : bbox.status() == Status.CONFIRMED or bbox.status() == Status.SURE, box.bboxes) # Get only accepted bboxes
+        accepted_bboxes = filter(lambda bbox : bbox.conf_status() == Status.CONFIRMED or bbox.conf_status() == Status.SURE, box.bboxes) # Get only accepted bboxes
         totals = defaultdict(int)
         groups = defaultdict(lambda : defaultdict(int))
         for bbox in accepted_bboxes:
@@ -379,7 +382,7 @@ class GUI:
         
         cnt = defaultdict(int)
 
-        accepted_bboxes = filter(lambda bbox : bbox.status() in Status.ACCEPTED, box.bboxes) # Get only accepted bboxes
+        accepted_bboxes = filter(lambda bbox : bbox.conf_status() in Status.ACCEPTED, box.bboxes) # Get only accepted bboxes
         sorted_bboxes = self.sort_bboxes_by_columns(accepted_bboxes, image_width=box.width)
 
         groups = defaultdict(lambda : defaultdict(lambda : defaultdict()))
@@ -463,6 +466,7 @@ class GUI:
     def start(self):
         self.make_interface()
         self.make_thresh()
+        self.started = True
 
     def current_entobox(self):
         if self.current < len(self.entoboxes) and self.current >= 0:
@@ -490,6 +494,10 @@ class GUI:
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
 
+        self.entobox_list = EntoboxList(self.controls_frame)
+        self.entobox_list.bind("<<Set-Index>>", self.set_index_list)
+        self.entobox_list.grid(column=1, row=8, columnspan=2, sticky="ew")
+
         self.root.bind("<Delete>", lambda e : self.reject_selected())
         self.root.bind("<Return>", lambda e : self.confirm_selected())
 
@@ -516,6 +524,9 @@ class GUI:
 
     def prev(self):
         self.set_index(self.current-1)
+    
+    def set_index_list(self, event):
+        self.set_index(event.x)
 
     def set_index(self, n : int):
         
@@ -584,7 +595,7 @@ class GUI:
         self.thresh_label.config(text= f"Confidence threshold: {int(entobox.conf_threshold*100)}%")
 
         for bbox in entobox.bboxes:
-            if bbox.status() in Status.NO_UPDATE:
+            if bbox.conf_status() in Status.NO_UPDATE:
                 continue
             self.canvas.update_bbox_color(bbox)
         #self.set_index(self.current) #Redraws current entobox 
@@ -598,7 +609,7 @@ class GUI:
             return
         cnt = 0
         for bbox in entobox.bboxes:
-            if bbox.status() in Status.ACCEPTED:
+            if bbox.conf_status() in Status.ACCEPTED:
                 cnt += 1
         self.number_label.config(text= str(cnt)+" speciments detected")
     
@@ -606,59 +617,13 @@ class GUI:
         self.canvas.combine_select_bboxes()
 
     def group_boxes(self):
-        label_window = tk.Toplevel()
-        label_window.configure(width=1000, height=1000)
-        label_window.geometry('+1000+1000')
-        tfrm = ttk.Frame(label_window, padding=5)
-        tfrm.grid()
-        tfrm.rowconfigure(2, weight=1)
-        ttk.Label(tfrm,text="Enter label name").grid(row=0,column=0)
-        e = ttk.Entry(tfrm)
-        e.grid(row=1,column=0)
-        e.focus()
-
-        tree_frame = ttk.Frame(tfrm)
-        tree_frame.grid(row=2,column=0)
-        tree_frame.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)       
-
-        tree = ttk.Treeview(tree_frame, columns=("Items",), show="headings", selectmode="browse")
-        # Add items
-        tree.heading(0, text="Existing Groups")
-        for group in self.groups:
-            tree.insert("", tk.END, values=(group,))
-
-        tree.grid(row=0, column=0)
-
-        # Create a Scrollbar
-        vert_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        vert_scroll.grid(row=0, column=1)
-        # Configure the Treeview to use the scrollbar
-        tree.configure(yscrollcommand=vert_scroll.set)
-        
-        hor_scroll = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
-        hor_scroll.grid(row=1, column=0)
-        hor_scroll.unbind("Ctrl")
-        # Configure the Treeview to use the scrollbar
-        tree.configure(xscrollcommand=hor_scroll.set)
-        
-        def change_group(a):
-            e.delete(0,tk.END)
-            item_id = tree.selection()[0]
-            e.insert(0, tree.item(item_id)["values"][0])
-
-        def conf_label(a = 0):  #dummy argument, needed to bind to <Return>
-            group_label = e.get()
+        print(self.current_entobox().groups)
+        label_window = GroupTopup(self.current_entobox().groups, self.set_group_label)
+    
+    def set_group_label(self, group_label):  #dummy argument, needed to bind to <Return>
             self.canvas.group_selected(group_label)
-            if not group_label in self.groups:
-                self.groups.append(group_label)
-            label_window.destroy()
-
-        # Bind selection event
-        tree.bind("<<TreeviewSelect>>", change_group)
-        
-        label_window.bind('<Return>',conf_label) #<Return> is the Enter key
-        ttk.Button(tfrm,text="Ok",command=conf_label).grid(row=3,column=0)
+            if not group_label in self.current_entobox().groups:
+                self.current_entobox().groups.append(group_label)
 
 
     def get_classes(self):
@@ -731,7 +696,7 @@ class GUI:
         """
         missing = False
         for bbox in self.entoboxes[self.current].bboxes:
-            if bbox.status() == Status.DOUBT:
+            if bbox.conf_status() == Status.DOUBT:
                 missing = True
                 break
         if missing:
@@ -753,7 +718,7 @@ class GUI:
         save_file = open(os.path.join(self.label_path,entobox.name+".json"),"w")
         boxes = list() 
 
-        bboxes_not_rejected = filter(lambda bbox : bbox.status() != Status.REJECTED, entobox.bboxes)
+        bboxes_not_rejected = filter(lambda bbox : bbox.conf_status() != Status.REJECTED, entobox.bboxes)
         sorted_bboxes : list[BBox] = self.sort_bboxes_by_columns(bboxes_not_rejected, image_width=entobox.width)
         cnt = defaultdict(int)
 
@@ -761,9 +726,10 @@ class GUI:
         for bbox in sorted_bboxes:
             i +=1
             bbox_name = f"{bbox.label}_{i}"
-            if bbox.status() in Status.ACCEPTED:
+            if bbox.conf_status() in Status.ACCEPTED:
                 cnt[bbox.label] += 1
                 bbox_name = bbox.label+"_"+str('{:03}'.format(cnt[bbox.label]))
+                print(bbox_name)
                 if bbox.label not in self.classes:
                     class_file.write(bbox.label+"\n")
                     self.classes.append(bbox.label)
@@ -792,8 +758,10 @@ class GUI:
         save_file.close()
         class_file.close()
 
-        #self.save_label.config(text="Save Successful")
-        self.popup("Save Successful")
+        entobox.set_saved(True)
+
+        self.save_label.config(text="Save Successful")
+        #self.popup("Save Successful")
         
     def popup(self,text):
         popup_window = tk.Toplevel()

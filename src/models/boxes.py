@@ -4,12 +4,14 @@ from src.models.coords import Coords
 from src.consts import *
 from wand.image import Image
 
+from tkinter import BooleanVar
+
 #One image of an entomology box
 #Instance created only when images are loaded into the viewer 
 #(not when scanning with neural net) 
 class EntoBox:
 
-    def __init__(self,name,img_path,bboxes_path = None, conf_threshold : float = DEFAULT_CONF):
+    def __init__(self,name,img_path,bboxes_path = None, conf_threshold : float = DEFAULT_CONF, is_saved = None):
         self.name = name
 
         #Get the image
@@ -18,7 +20,8 @@ class EntoBox:
             t = img.ping(filename=f'{img_path}[0]')
             self.width, self.height = t.width, t.height
 
-        print(f"Image {name} dim = {self.width}x{self.height}")
+        
+        self.saved = BooleanVar(value=is_saved or False)
 
         #Get the bboxes
         self.bboxes = []
@@ -27,12 +30,16 @@ class EntoBox:
         if bboxes_path != None:
             self.get_bboxes(bboxes_path)
 
-
     def get_bboxes(self,bboxes_path):
         if(os.path.isfile(os.path.join(bboxes_path,self.name+".json"))):
             with open(os.path.join(bboxes_path,self.name+".json"), "r") as f:
                 bboxes_dict = json.load(f)
-            self.conf_threshold = bboxes_dict["conf"]
+            
+            try :
+                self.conf_threshold = bboxes_dict["conf"]
+            except:
+                self.conf_threshold = DEFAULT_CONF
+            
             for bbox in bboxes_dict["bboxes"]:
                 
                 [x,y,w,h] = bbox["position"]
@@ -43,6 +50,8 @@ class EntoBox:
 
                 self.bboxes.append(BBox([x1,y1,x2,y2],parent=self, conf=bbox["conf"], group=bbox["group"], label=bbox["label"]))
                 
+                if bbox["group"] not in self.groups:
+                    self.groups.append(bbox["group"])
             return
         if(os.path.isfile(os.path.join(bboxes_path,self.name+".txt"))):
             self.bboxes = []
@@ -63,6 +72,12 @@ class EntoBox:
                 self.bboxes.append(BBox([x1,y1,x2,y2],c,self))
             txt.close()
 
+    def set_saved(self, value):
+        self.saved.set(bool(value))
+
+    def is_saved(self):
+        return self.saved.get()
+
 class BBox:
 
     def __init__(self,coord,conf : float,parent : EntoBox, label : str = DEFAULT_LABEL, group : str = ""):
@@ -78,12 +93,16 @@ class BBox:
 
     def status(self):
         if self.is_selected:
-            return Status.SELECTED
+            return Status.SELECTED 
+        return self.conf_status()
+    
+    def conf_status(self):
         if self.conf == 1:
             return Status.CONFIRMED
         if self.conf == 0:
             return Status.REJECTED
         return Status.SURE if (self.conf >= self.parent.conf_threshold) else Status.DOUBT
+    
 
     def color(self):
         return COLORS[self.status()]

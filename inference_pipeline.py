@@ -153,20 +153,20 @@ def parse_args():
     parser.add_argument(
         "--max_overlap",
         type=float,
-        default=0.25,
-        help="Maximum overlap between detections (default: 0.25)"
+        default=1,
+        help="Maximum overlap between detections (default: 1 - overlap allowed)"
     )
     parser.add_argument(
         "--model",
         type=str,
-        default=os.path.join("model", "final_23.pt"),
-        help="Path to detection model (default: final_23.pt, in the model directory)"
+        default=os.path.join("model", "rbins.pt"),
+        help="Path to detection model (default: rbins.pt, in the model directory)"
     )
     parser.add_argument(
         "--classifier",
         type=str,
-        default=os.path.join("model", "final_23.keras"),
-        help="Path to posterior classifier (default: final_23.keras, in the model directory)"
+        default=os.path.join("model", "rbins.keras"),
+        help="Path to posterior classifier (default: rbins.keras, in the model directory)"
     )
     parser.add_argument(
         "--resize_mode",
