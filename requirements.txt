@@ -1,8 +1,8 @@
-opencv-python
-tensorflow
-pyyaml
-pandas
-matplotlib
-scikit-learn
-ultralytics
-wand
+opencv-python==4.13.0.62
+tensorflow==2.20.0
+pyyaml==6.0.3
+pandas==3.0.1
+matplotlib==3.10.8
+scikit-learn==1.8.0
+ultralytics==8.4.15
+wand==0.7.2
