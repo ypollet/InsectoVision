@@ -54,15 +54,26 @@ class EntoboxList(ttk.Frame):
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        self.canvas.bind_all("<MouseWheel>", self._on_mouse_wheel)
-        self.canvas.bind_all("<Button-4>", self._on_mouse_wheel_linux)
-        self.canvas.bind_all("<Button-5>", self._on_mouse_wheel_linux)
+        self.inner_frame.bind('<Enter>', self._bound_to_mousewheel)
+        self.inner_frame.bind('<Leave>', self._unbound_to_mousewheel)
+
+        
 
         self.add_items(entoboxes)
 
         self.inner_frame.update_idletasks()
         
         self.configure_canvas_size()
+
+    def _bound_to_mousewheel(self, event):
+        self.canvas.bind_all("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind_all("<Button-4>", self._on_mouse_wheel_linux)
+        self.canvas.bind_all("<Button-5>", self._on_mouse_wheel_linux)
+
+    def _unbound_to_mousewheel(self, event):
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
     
     def configure_canvas_size(self):
         self.canvas.configure(height=min(self.inner_frame.winfo_height(), MAX_SIZE_ENTOBOX_LIST))
@@ -98,7 +109,6 @@ class EntoboxList(ttk.Frame):
         self.configure_canvas_size()
     
     def set_index(self, index):
-        print(index)
         self.event_generate("<<Set-Index>>", x=index)
 
     def _on_frame_configure(self, event):
@@ -112,12 +122,12 @@ class EntoboxList(ttk.Frame):
         if self.inner_frame.winfo_height() < self.canvas.winfo_height():
             return
         delta = 1 if event.num == 5 else -1
-        self.canvas.yview_scroll(delta, "units")
+        self.canvas.yview_scroll(delta*5, "units")
     
     def _on_mouse_wheel(self, event):
         if self.inner_frame.winfo_height() < self.canvas.winfo_height():
             return
-        self.canvas.yview_scroll(-math.copysign(1, event.delta), "units")
+        self.canvas.yview_scroll(-math.copysign(5, event.delta), "units")
     
     def set_checked(self, index, value):
         if 0 <= index < len(self.rows):

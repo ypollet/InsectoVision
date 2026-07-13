@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 from collections import defaultdict
 import pandas as pd
 import json
+import time
 
 from src.components.entobox_canvas import EntoboxCanvas
 from src.components.entobox_list import EntoboxList, EntoboxItem
@@ -35,7 +36,6 @@ class GUI:
     label_path = None
 
     model = DEFAULT_MODEL
-    detection_only = True
 
     n_img = 0
     crop_margin = 1.1
@@ -52,24 +52,37 @@ class GUI:
         root.minsize(300,150)
         root.attributes('-zoomed', True)
         root.title("InsectoVision")
-        main_frame = ttk.Frame(root, padding=1)
-        main_frame.grid(sticky="nsew")
+
+        self.model_param_frame = ttk.Frame(root)
+        self.model_param_frame.pack(fill="both", expand=True)
+        self.param_window = None
+
+        self.model_var = tk.StringVar()
+        self.model_var.set("Model: "+ self.model)
+        
+        self.detection_only = tk.BooleanVar(value=True)
+        
+        self.set_param_frame(self.model_param_frame)
+
+        self.main_frame = ttk.Frame(root, padding=1)
+        
         root.grid_columnconfigure(0, weight=1)
         root.grid_rowconfigure(0, weight=1)
 
-        self.canvas_frame = ttk.Frame(main_frame)
+
+        self.canvas_frame = ttk.Frame(self.main_frame)
         self.canvas_frame.grid(column=0, row=0, sticky="nsew")
         self.canvas_frame.grid_columnconfigure(0, weight=1)
         self.canvas_frame.grid_rowconfigure(0, weight=1)
 
         self.canvas = None
 
-        self.controls_frame = ttk.Frame(main_frame)
+        self.controls_frame = ttk.Frame(self.main_frame)
         self.controls_frame.grid(column=1, row=0, sticky="ns")
 
-        main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=0)
-        main_frame.grid_rowconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(1, weight=0)
+        self.main_frame.grid_rowconfigure(0, weight=1)
         self.root = root
 
         self.make_menubar()
@@ -77,6 +90,24 @@ class GUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close);
         self.root.focus()
         self.root.mainloop()
+
+    def set_param_frame(self, main_frame : ttk.Frame):
+
+        model_label = ttk.Label(main_frame,textvariable=self.model_var)
+        model_label.grid(row=0,column=0)
+        ttk.Button(main_frame,text="Select model",command=lambda parent=main_frame : self.select_model(parent)).grid(row=0,column=1)
+        
+        ttk.Checkbutton(main_frame,text="Post-detection classifier",variable=self.detection_only,onvalue=False,offvalue=True).grid(row=1,column=0)
+        ttk.Button(main_frame,text="Reset Default",command=self.reset_params).grid(row=2,column=0)
+    
+    def select_model(self, parent : ttk.Frame):
+            self.model = fd.askopenfilename(parent=parent, initialdir="model",filetypes=[("PyTorch model file",".pt")])
+            self.model_var.set("Model: "+ self.model)
+
+    def reset_params(self):
+            self.model = DEFAULT_MODEL
+            self.model_var.set("Model: "+ self.model)
+            self.detection_only.set(True)
 
     def make_menubar(self):
         menubar = tk.Menu(self.root)
@@ -92,15 +123,16 @@ class GUI:
         filemenu.add_command(label="Quick open from URLs...",command= lambda : self.quick_open(use_url=True))
         filemenu.add_separator()
         #filemenu.add_command(label="Select annotation save folder...",command=self.choose_output)
-        filemenu.add_command(label="Summarize saved boxes",command=self.summarize)
-        filemenu.add_command(label="Crop specimens from current box",command=self.crop_current)
-        filemenu.add_separator()
-        filemenu.add_command(label="Parameters",command=self.model_params)
+        filemenu.add_command(label="Parameters",command=self.model_params_window)
         menubar.add_cascade(label="File",menu=filemenu)
 
         editmenu = tk.Menu(menubar,tearoff=False)
         editmenu.add_command(label="Edit boxes Ctrl+E",command=self.edit_mode)
         editmenu.add_command(label="Drawing boxes Ctrl+B",command=self.draw_mode)
+        editmenu.add_separator()
+        editmenu.add_command(label="Save yolo label Ctrl+S",command=self.save)
+        editmenu.add_command(label="Crop specimens from current box",command=self.crop_current)
+        editmenu.add_command(label="Summarize saved boxes",command=self.summarize)
         
         editmenu.add_command(label="Combine selected bboxes",command=self.combine)
         #editmenu.add_command(label="Add label",command=self.add_label)
@@ -207,9 +239,9 @@ class GUI:
         return need_inf
 
     def run_inference(self):
-        sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent","--model", "--img_sz", 960]
+        sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent", "--img_size", "960", "--model"]
         sys.argv.append(self.model)
-        if self.detection_only: 
+        if self.detection_only.get(): 
             sys.argv.append("--detection_only")
         
         print(sys.argv)
@@ -253,42 +285,25 @@ class GUI:
 
         self.load_images(chosen[:self.al_nbr])
 
-    def model_params(self):
+    def model_params_window(self):
+        self.params_open = True
+        self.param_window = tk.Toplevel()
+        self.param_window.config(width=600,height=100)
+        self.param_window.geometry('+500+500')
+        self.param_window.attributes("-topmost", True)
         
-        def select_model():
-            self.model = fd.askopenfilename(initialdir="model",filetypes=[("PyTorch model file",".pt")])
-            model_label.config(text="Model: "+ self.model)
-
-        param_window = tk.Toplevel()
-        param_window.config(width=600,height=100)
-        param_window.geometry('+500+500')
-        tfrm = ttk.Frame(param_window, padding=5)
+        tfrm = ttk.Frame(self.param_window, padding=5)
         tfrm.grid()
 
-        model_label = ttk.Label(tfrm,text="Model: "+ self.model)
-        model_label.grid(row=0,column=0)
-        ttk.Button(tfrm,text="Select model",command=select_model).grid(row=0,column=1)
-        
-        
-        detonly = tk.BooleanVar()
-        detonly.set(self.detection_only)
-        ttk.Checkbutton(tfrm,text="Post-detection classifier",variable=detonly,onvalue=False,offvalue=True).grid(row=1,column=0)
-        
+        self.set_param_frame(tfrm)
 
         def conf_label():
-            self.detection_only = detonly.get()
-            param_window.destroy()
-        
-        def reset_params():
-            self.model = DEFAULT_MODEL
-            model_label.config(text="Model: "+ self.model)
-            self.detection_only = True
-            detonly.set(self.detection_only)
-        
-        ttk.Button(tfrm,text="Reset Default",command=reset_params).grid(row=2,column=0)
+            self.params_open = False
+            self.param_window.destroy()
+            self.param_window = None
         ttk.Button(tfrm,text="Confirm",command=conf_label).grid(row=2,column=1)
-        
-        param_window.focus()
+        self.param_window.lift()
+        self.param_window.focus()
     
     def summarize(self):
         entobox = self.current_entobox()
@@ -468,6 +483,8 @@ class GUI:
         self.make_interface()
         self.make_thresh()
         self.started = True
+        self.model_param_frame.pack_forget()
+        self.main_frame.pack(fill="both", expand=True)
 
     def current_entobox(self):
         if self.current < len(self.entoboxes) and self.current >= 0:
@@ -489,21 +506,32 @@ class GUI:
         ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=3,padx=PADX)
         ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=4,padx=PADX)
 
+<<<<<<< HEAD
         ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=6, padx=PADX)
         ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=6, padx=PADX)
         #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=7, padx=PADX)
         self.save_label = ttk.Label(self.controls_frame)
         self.save_label.grid(column=1,row=5,padx=PADX)
+=======
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=6, columnspan=2, sticky="ew", pady=PADY)
+
+        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=8, padx=PADX)
+        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=8, padx=PADX)
+        #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=9, padx=PADX)
+        self.save_label = ttk.Label(self.controls_frame, anchor="center")
+        self.save_label.grid(column=1,row=7, columnspan=2,padx=PADX)
+>>>>>>> 268e6a1 (Feat : params on start menu)
 
         self.entobox_list = EntoboxList(self.controls_frame)
         self.entobox_list.bind("<<Set-Index>>", self.set_index_list)
-        self.entobox_list.grid(column=1, row=8, columnspan=2, sticky="ew")
+        self.entobox_list.grid(column=1, row=9, columnspan=2, sticky="ew", pady=PADY)
 
         self.root.bind("<Delete>", lambda e : self.reject_selected())
         self.root.bind("<Return>", lambda e : self.confirm_selected())
 
         self.root.bind("<Control-e>", lambda e : self.edit_mode())
         self.root.bind("<Control-b>", lambda e : self.draw_mode())
+        self.root.bind("<Control-s>", lambda e : self.save_current())
 
     def make_thresh(self):
         self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
@@ -707,7 +735,7 @@ class GUI:
         #uncomment to force user to confirm all incorrect bboxes
 
         if not os.path.isdir(self.label_path):
-            #self.save_label.config(text="Save failed: Save folder does not exist")
+            self.save_label.config(text="Save failed: Save folder does not exist", foreground="red")
             self.popup("Save failed: Save folder does not exist")
             return
 
@@ -729,7 +757,6 @@ class GUI:
             if bbox.conf_status() in Status.ACCEPTED:
                 cnt[bbox.label] += 1
                 bbox_name = bbox.label+"_"+str('{:03}'.format(cnt[bbox.label]))
-                print(bbox_name)
                 if bbox.label not in self.classes:
                     class_file.write(bbox.label+"\n")
                     self.classes.append(bbox.label)
@@ -760,7 +787,7 @@ class GUI:
 
         entobox.set_saved(True)
 
-        self.save_label.config(text="Save Successful")
+        self.save_label.config(text=f"Saved {entobox.name} successfully", foreground="green")
         #self.popup("Save Successful")
         
     def popup(self,text):
