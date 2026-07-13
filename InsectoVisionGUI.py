@@ -494,37 +494,36 @@ class GUI:
     def make_interface(self):
         #Title and buttons
         self.title_label_text = StringVar(value="Image "+str(self.current+1)+" /"+str(self.n_img))
-        self.title_label = ttk.Label(self.controls_frame, textvariable=self.title_label_text)
-        self.title_label.grid(column=1, row=0)
-        self.number_label = ttk.Label(self.controls_frame, text= str(len(self.current_entobox().bboxes) if self.current_entobox() else 0)+" speciments detected",width=23)
-        self.number_label.grid(column=2,row=0)
-        ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=PADX)
-        ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=PADX)
-        ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=2,padx=PADX)
-        ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=2,padx=PADX)
-        ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=3,padx=PADX)
-        ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=3,padx=PADX)
-        ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=4,padx=PADX)
+        self.title_label = ttk.Label(self.controls_frame, textvariable=self.title_label_text, anchor="center")
+        self.title_label.grid(column=1, row=0, columnspan=2,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=SMALL_PAD)
 
-<<<<<<< HEAD
-        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=6, padx=PADX)
-        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=6, padx=PADX)
-        #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=7, padx=PADX)
-        self.save_label = ttk.Label(self.controls_frame)
-        self.save_label.grid(column=1,row=5,padx=PADX)
-=======
-        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=6, columnspan=2, sticky="ew", pady=PADY)
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=2, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
 
-        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=8, padx=PADX)
-        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=8, padx=PADX)
-        #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=9, padx=PADX)
+        self.number_label = ttk.Label(self.controls_frame, text=str(len(self.current_entobox().bboxes) if self.current_entobox() else 0)+" speciments detected", anchor="center")
+        self.number_label.grid(column=1,row=3, columnspan=2,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=4,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=4,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=5,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=5,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=6,padx=SMALL_PAD)
+
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=8, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+
         self.save_label = ttk.Label(self.controls_frame, anchor="center")
-        self.save_label.grid(column=1,row=7, columnspan=2,padx=PADX)
->>>>>>> 268e6a1 (Feat : params on start menu)
+        self.save_label.grid(column=1,row=9, columnspan=2,padx=SMALL_PAD)
 
+        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=10, padx=SMALL_PAD)
+        #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
+        
+        ttk.Label(self.controls_frame, text="").grid(column=1,row=11, columnspan=2, sticky="ew", padx=SMALL_PAD, pady=MEDIUM_PAD)
+
+        ttk.Label(self.controls_frame, text="List of images :", anchor="w").grid(column=1, row=12, sticky="ew")
         self.entobox_list = EntoboxList(self.controls_frame)
         self.entobox_list.bind("<<Set-Index>>", self.set_index_list)
-        self.entobox_list.grid(column=1, row=9, columnspan=2, sticky="ew", pady=PADY)
+        self.entobox_list.grid(column=1, row=13, columnspan=2, sticky="ew", pady=SMALL_PAD, padx=MEDIUM_PAD)
 
         self.root.bind("<Delete>", lambda e : self.reject_selected())
         self.root.bind("<Return>", lambda e : self.confirm_selected())
@@ -535,10 +534,10 @@ class GUI:
 
     def make_thresh(self):
         self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
-        self.thresh_label.grid(column=1,row=5,padx=PADX)
+        self.thresh_label.grid(column=1,row=7,padx=SMALL_PAD)
 
         self.thresh_scale = ttk.Scale(self.controls_frame, from_=1,to=100,command=self.update_thresh)
-        self.thresh_scale.grid(column=2,row=5,padx=PADX)
+        self.thresh_scale.grid(column=2,row=7,padx=SMALL_PAD)
         self.thresh_scale.set(100*DEFAULT_CONF)
     
     def draw_bbox(self, bbox):

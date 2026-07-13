@@ -32,8 +32,10 @@ COLORS =    {
 
 
 BWIDTH = 15 #Button width
-PADX = 0 #x axis padding between buttons/labels
-PADY = 5 #x axis padding between buttons/labels
+NO_PAD = 0
+SMALL_PAD = 5
+MEDIUM_PAD = 10
+LARGE_PAD = 20
 PAD_BOX = 5
 
 
