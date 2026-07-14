@@ -7,6 +7,7 @@ from src.models.boxes import EntoBox
 from src.consts import MAX_SIZE_ENTOBOX_LIST
 
 from src.components.scrollbar import AutoScrollbar
+
 class EntoboxItem(ttk.Frame):
     def __init__(self, master, entobox : EntoBox, **kwargs):
         super().__init__(master, **kwargs)
@@ -61,8 +62,6 @@ class EntoboxList(ttk.Frame):
 
         self.add_items(entoboxes)
 
-        self.inner_frame.update_idletasks()
-        
         self.configure_canvas_size()
 
     def _bound_to_mousewheel(self, event):
@@ -76,6 +75,8 @@ class EntoboxList(ttk.Frame):
         self.canvas.unbind_all("<Button-5>")
     
     def configure_canvas_size(self):
+        self.inner_frame.update_idletasks()
+        print(f"Configure : {min(self.inner_frame.winfo_height(), MAX_SIZE_ENTOBOX_LIST)}")
         self.canvas.configure(height=min(self.inner_frame.winfo_height(), MAX_SIZE_ENTOBOX_LIST))
         if self.inner_frame.winfo_height() < MAX_SIZE_ENTOBOX_LIST:
             self.scrollbar.grid_remove()
@@ -91,21 +92,20 @@ class EntoboxList(ttk.Frame):
         self.rows = []
     
     def add_items(self, entoboxes : list[EntoBox]):
-
         for entobox in entoboxes:
+            print(f"Adding {entobox.name}")
             row = EntoboxItem(self.inner_frame, entobox)
             index = len(self.rows)
             row.bind("<Double-Button-1>", lambda e, index=index: self.set_index(index))
-            row.pack(fill="x", padx=0, pady=1)
+            row.pack(fill="x")
             self.rows.append(row)
-        self.inner_frame.update_idletasks()
         self.configure_canvas_size()
+        print(f"After configure")
     
     def add_item(self, entobox_item : EntoboxItem):
 
-        entobox_item.pack(fill="x", padx=0, pady=1)
+        entobox_item.pack(fill="x")
         self.rows.append(entobox_item)
-        self.inner_frame.update_idletasks()
         self.configure_canvas_size()
     
     def set_index(self, index):

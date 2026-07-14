@@ -233,6 +233,7 @@ class GUI:
                 self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path, ai_labels, saved_labels))
         
         self.n_img = len(self.entoboxes)
+        print(f"Loaded {self.n_img}")
 
         # Reset image_tree 
         self.image_list.reset()
@@ -555,6 +556,7 @@ class GUI:
 
         row += 1
         self.image_list = EntoboxList(self.controls_frame)
+        self.image_list.add_items([EntoBox("Placeholder", None)]) # Bugs if not added as placeholder
         self.image_list.bind("<<Set-Index>>", self.set_index_list)
         self.image_list.grid(column=1, row=row, columnspan=2, sticky="ew", pady=SMALL_PAD, padx=MEDIUM_PAD)
 

@@ -16,9 +16,14 @@ class EntoBox:
 
         #Get the image
         self.image = img_path
-        with Image() as img:
-            t = img.ping(filename=f'{img_path}[0]')
-            self.width, self.height = t.width, t.height
+        if img_path != None:
+            self.image = img_path
+            with Image() as img:
+                t = img.ping(filename=f'{img_path}[0]')
+                self.width, self.height = t.width, t.height
+        else:
+            self.width = 1
+            self.height = 1
 
         
         self.saved = BooleanVar(value=saved_path != None)
