@@ -25,9 +25,7 @@ class GUI:
     started = False
     entoboxes = []
     current = 0
-    drawn_bboxes = []
-    selected = []
-    classes = []
+    classes = [DEFAULT_LABEL]
     img_id = None
 
     source_path = None
@@ -211,62 +209,66 @@ class GUI:
         if names is None:
             names = os.listdir(self.img_path)
 
-        need_inf = False
 
         for entry in sorted(names):
             # TODO : select images that are not only .jpg
             if(entry.endswith(".jpg")):
                 img_path = os.path.join(self.img_path,entry)
-                if(os.path.exists(os.path.join(self.source_path,"labels",entry[:len(entry)-4]+".txt"))):
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.label_path, is_saved=True))
-
-                elif(os.path.exists(os.path.join(self.source_path,"raw_ai_labels",entry[:len(entry)-4]+".txt"))):
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path,self.raw_path))
-
-                else:
-                    self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path))
-                    need_inf = True
+                saved_labels = None
+                ai_labels = None
+                
+                labels_path = os.path.join(self.source_path,"labels")
+                json_path = os.path.join(labels_path, entry[:len(entry)-4]+".json")
+                yolo_path = os.path.join(labels_path, entry[:len(entry)-4]+".txt")
+                if(os.path.exists(json_path)):
+                    saved_labels = json_path
+                elif(os.path.exists(yolo_path)):
+                    saved_labels = yolo_path   
+                
+                ai_yolo_file = os.path.join(self.source_path,"raw_ai_labels",entry[:len(entry)-4]+".txt")
+                
+                if(os.path.exists(ai_yolo_file)):
+                    ai_labels = ai_yolo_file
+                
+                self.entoboxes.append(EntoBox(entry[:len(entry)-4],img_path, ai_labels, saved_labels))
         
         self.n_img = len(self.entoboxes)
 
         # Reset image_tree 
-        self.entobox_list.reset()
-        self.entobox_list.add_items(self.entoboxes)
+        self.image_list.reset()
+        self.image_list.add_items(self.entoboxes)
         
-        self.current = 0
         self.set_index(0)
 
-        return need_inf
+        return
 
     def run_inference(self):
-        sys.argv = ["inference_pipeline.py", '--input_folder' , self.img_path, "--write_conf","--silent", "--img_size", "960", "--model"]
-        sys.argv.append(self.model)
-        if self.detection_only.get(): 
-            sys.argv.append("--detection_only")
-        
-        print(sys.argv)
+        self.root.title("InsectoVision - " + self.entoboxes[self.current].name)
+        for entobox in self.entoboxes:
+            if entobox.ai_labels != None:
+                continue
+            print(f"Running inference for {entobox.name}")
+            sys.argv = ["inference_pipeline.py", '--input' , entobox.image, '--output' , os.path.join(self.source_path,"raw_ai_labels"), "--max_overlap", "0.8","--write_conf","--silent", "--img_size", "960", "--model"]
+            sys.argv.append(self.model)
+            if self.detection_only.get(): 
+                sys.argv.append("--detection_only")
+            
+            #print(sys.argv)
 
-        for file in os.listdir(self.raw_path):
-            if file.endswith(".txt"):
-                os.remove(os.path.join(self.raw_path,file))
+            self.root.title("InsectoVision - Scanning...")
+            
+            args = inference_pipeline.parse_args()
+            inference_pipeline.main(args)
 
-        self.root.title("InsectoVision - Scanning...")
-        
-        args = inference_pipeline.parse_args()
-        inference_pipeline.main(args)
+            
 
-        for file in os.listdir("output"):
-            move(os.path.join(os.getcwd(),"output",file),os.path.join(self.source_path,"raw_ai_labels"))
+            entobox.ai_labels = os.path.join(self.source_path,"raw_ai_labels", entobox.name + ".txt")
+            if entobox.saved_labels == None:
+                
+                entobox.load_bboxes()
 
-        os.rmdir("output")
-
-        self.root.title("InsectoVision - "+self.entoboxes[self.current].name)
-
-        for eb in self.entoboxes:
-            eb.get_bboxes(self.raw_path)
-        
-        if self.entoboxes != []:
-            self.show_image()
+            if entobox == self.current_entobox():
+                self.show_image()
 
     def quick_open(self,use_url = False):
         if use_url:
@@ -274,9 +276,9 @@ class GUI:
         else: 
             self.choose_input()
         
-        need_inf = self.load_images()
+        self.load_images()
         
-        if need_inf: self.run_inference()
+        self.run_inference()
 
     def open_AL(self):
         self.entoboxes = []
@@ -316,7 +318,7 @@ class GUI:
         if entobox is None:
             return
         
-        self.get_classes()
+        #self.get_classes()
         
         accepted_bboxes = filter(lambda bbox : bbox.conf_status() == Status.CONFIRMED or bbox.conf_status() == Status.SURE, box.bboxes) # Get only accepted bboxes
         totals = defaultdict(int)
@@ -338,7 +340,7 @@ class GUI:
     def summarize_from_label_files(self):
         
         types = defaultdict(int)
-        self.get_classes()
+        #self.get_classes()
 
         for boxfile in os.listdir(self.label_path):
             if boxfile.endswith(".txt") and boxfile != "classes.txt" and not boxfile.endswith("_tags.txt"):
@@ -373,7 +375,7 @@ class GUI:
 
     def crop_bboxes(self,box : EntoBox):
         
-        self.get_classes()
+        #self.get_classes()
 
         
         
@@ -481,7 +483,6 @@ class GUI:
 
     def start(self):
         self.make_interface()
-        self.make_thresh()
         self.started = True
         self.model_param_frame.pack_forget()
         self.main_frame.pack(fill="both", expand=True)
@@ -492,38 +493,70 @@ class GUI:
         return None
 
     def make_interface(self):
+        row = 0
         #Title and buttons
         self.title_label_text = StringVar(value="Image "+str(self.current+1)+" /"+str(self.n_img))
         self.title_label = ttk.Label(self.controls_frame, textvariable=self.title_label_text, anchor="center")
-        self.title_label.grid(column=1, row=0, columnspan=2,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=1,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=1,padx=SMALL_PAD)
+        self.title_label.grid(column=1, row=row, columnspan=2,padx=SMALL_PAD)
+        
+        row += 1
+        ttk.Button(self.controls_frame,text="Previous", command=self.prev,width=BWIDTH).grid(column=1, row=row,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Next", command=self.next,width=BWIDTH).grid(column=2, row=row,padx=SMALL_PAD)
 
-        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=2, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+        row += 1
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
 
+        row += 1
         self.number_label = ttk.Label(self.controls_frame, text=str(len(self.current_entobox().bboxes) if self.current_entobox() else 0)+" speciments detected", anchor="center")
-        self.number_label.grid(column=1,row=3, columnspan=2,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=4,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=4,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=1,row=5,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="New box",command=self.draw_mode,width=BWIDTH).grid(column=2,row=5,padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=6,padx=SMALL_PAD)
+        self.number_label.grid(column=1,row=row, columnspan=2,padx=SMALL_PAD)
 
-        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=8, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+        row += 1
+        ttk.Button(self.controls_frame,text="Good detection",command=self.confirm_selected,width=BWIDTH).grid(column=1,row=row,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Bad detection",command=self.reject_selected,width=BWIDTH).grid(column=2,row=row,padx=SMALL_PAD)
 
+        row += 1
+        ttk.Button(self.controls_frame,text="Combine boxes",command=self.combine,width=BWIDTH).grid(column=2,row=row,padx=SMALL_PAD)
+
+        row += 1
+        ttk.Button(self.controls_frame,text="Edit boxes",command=self.edit_mode,width=BWIDTH).grid(column=1,row=row,padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Draw boxes",command=self.draw_mode,width=BWIDTH).grid(column=2,row=row,padx=SMALL_PAD)
+
+        row += 1
+        ttk.Button(self.controls_frame,text="Group boxes",command=self.group_boxes,width=BWIDTH).grid(column=1,row=row,padx=SMALL_PAD)
+
+        # Thresh
+        row += 1
+        self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
+        self.thresh_label.grid(column=1,row=row,padx=SMALL_PAD)
+
+        self.thresh_scale = ttk.Scale(self.controls_frame, from_=1,to=100,command=self.update_thresh)
+        self.thresh_scale.grid(column=2,row=row,padx=SMALL_PAD)
+        self.thresh_scale.set(100*DEFAULT_CONF)
+
+        row += 1
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+
+        row += 1
         self.save_label = ttk.Label(self.controls_frame, anchor="center")
-        self.save_label.grid(column=1,row=9, columnspan=2,padx=SMALL_PAD)
+        self.save_label.grid(column=1,row=row, columnspan=2,padx=SMALL_PAD)
 
-        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
-        ttk.Button(self.controls_frame,text="Save yolo labels",command=self.save_current,width=BWIDTH).grid(column=2,row=10, padx=SMALL_PAD)
+        row += 1
+        ttk.Button(self.controls_frame,text="Save crops",command=self.crop_current,width=BWIDTH).grid(column=1,row=row, padx=SMALL_PAD)
+        ttk.Button(self.controls_frame,text="Save labels",command=self.save_current,width=BWIDTH).grid(column=2,row=row, padx=SMALL_PAD)
+
+        #row += 1
         #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
         
-        ttk.Label(self.controls_frame, text="").grid(column=1,row=11, columnspan=2, sticky="ew", padx=SMALL_PAD, pady=MEDIUM_PAD)
+        row += 1
+        ttk.Label(self.controls_frame, text="").grid(column=1,row=row, columnspan=2, sticky="ew", padx=SMALL_PAD, pady=MEDIUM_PAD)
 
-        ttk.Label(self.controls_frame, text="List of images :", anchor="w").grid(column=1, row=12, sticky="ew")
-        self.entobox_list = EntoboxList(self.controls_frame)
-        self.entobox_list.bind("<<Set-Index>>", self.set_index_list)
-        self.entobox_list.grid(column=1, row=13, columnspan=2, sticky="ew", pady=SMALL_PAD, padx=MEDIUM_PAD)
+        row += 1
+        ttk.Label(self.controls_frame, text="List of images :", anchor="w").grid(column=1, row=row, sticky="ew")
+
+        row += 1
+        self.image_list = EntoboxList(self.controls_frame)
+        self.image_list.bind("<<Set-Index>>", self.set_index_list)
+        self.image_list.grid(column=1, row=row, columnspan=2, sticky="ew", pady=SMALL_PAD, padx=MEDIUM_PAD)
 
         self.root.bind("<Delete>", lambda e : self.reject_selected())
         self.root.bind("<Return>", lambda e : self.confirm_selected())
@@ -532,13 +565,7 @@ class GUI:
         self.root.bind("<Control-b>", lambda e : self.draw_mode())
         self.root.bind("<Control-s>", lambda e : self.save_current())
 
-    def make_thresh(self):
-        self.thresh_label = ttk.Label(self.controls_frame, text= f"Confidence threshold: {int(100*DEFAULT_CONF)}%",width=26)
-        self.thresh_label.grid(column=1,row=7,padx=SMALL_PAD)
-
-        self.thresh_scale = ttk.Scale(self.controls_frame, from_=1,to=100,command=self.update_thresh)
-        self.thresh_scale.grid(column=2,row=7,padx=SMALL_PAD)
-        self.thresh_scale.set(100*DEFAULT_CONF)
+        
     
     def draw_bbox(self, bbox):
         self.canvas.draw_bbox(bbox)
@@ -557,7 +584,6 @@ class GUI:
         self.set_index(event.x)
 
     def set_index(self, n : int):
-        
         if self.n_img == 0:
             self.current = 0
             return
@@ -572,7 +598,6 @@ class GUI:
         self.save_label.config(text="")
         self.title_label_text.set("Image "+str(self.current+1)+" /"+str(self.n_img))
 
-        self.selected = []
         self.canvas_frame.update_idletasks()
         self.canvas = EntoboxCanvas(self.canvas_frame, entobox)
         self.canvas.grid(column=0,row=0,sticky="nsew")
@@ -590,10 +615,6 @@ class GUI:
             self.canvas.destroy()
             self.canvas = None
     
-    def unselect(self):
-        for bbox in self.selected:
-            self.redraw_bbox(bbox)
-        self.selected = []
 
     def confirm_selected(self):
         if self.canvas:
@@ -626,7 +647,6 @@ class GUI:
             if bbox.conf_status() in Status.NO_UPDATE:
                 continue
             self.canvas.update_bbox_color(bbox)
-        #self.set_index(self.current) #Redraws current entobox 
         if update_thresh_scale:
             self.thresh_scale.set(int(entobox.conf_threshold*100))
         self.update_count()
@@ -738,7 +758,7 @@ class GUI:
             self.popup("Save failed: Save folder does not exist")
             return
 
-        self.get_classes()
+        #self.get_classes()
         
         class_file = open(os.path.join(self.label_path,"classes.txt"),"a")
         yolo_file = open(os.path.join(self.label_path,entobox.name+".txt"),"w")
@@ -784,7 +804,7 @@ class GUI:
         save_file.close()
         class_file.close()
 
-        entobox.set_saved(True)
+        entobox.save(save_json)
 
         self.save_label.config(text=f"Saved {entobox.name} successfully", foreground="green")
         #self.popup("Save Successful")

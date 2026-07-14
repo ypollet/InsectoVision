@@ -11,7 +11,7 @@ from tkinter import BooleanVar
 #(not when scanning with neural net) 
 class EntoBox:
 
-    def __init__(self,name,img_path,bboxes_path = None, conf_threshold : float = DEFAULT_CONF, is_saved = None):
+    def __init__(self,name,img_path,ai_yolo_path = None, saved_path = None, conf_threshold : float = DEFAULT_CONF):
         self.name = name
 
         #Get the image
@@ -21,62 +21,42 @@ class EntoBox:
             self.width, self.height = t.width, t.height
 
         
-        self.saved = BooleanVar(value=is_saved or False)
+        self.saved = BooleanVar(value=saved_path != None)
 
         #Get the bboxes
         self.bboxes = []
         self.groups = []
         self.conf_threshold = conf_threshold
-        if bboxes_path != None:
-            self.get_bboxes(bboxes_path)
+        self.ai_labels = ai_yolo_path
+        self.saved_labels = saved_path
+        if self.ai_labels != None or self.saved_labels != None:
+            self.load_bboxes()
 
-    def get_bboxes(self,bboxes_path):
-        if(os.path.isfile(os.path.join(bboxes_path,self.name+".json"))):
-            with open(os.path.join(bboxes_path,self.name+".json"), "r") as f:
-                bboxes_dict = json.load(f)
+    def load_bboxes(self):
+        print(f"Loading bboxes for {self.name} : {self.saved_labels} / {self.ai_labels}")
+        try:
+            if(self.saved_labels != None):
+                if self.saved_labels.endswith(".json"):
+                    self.bboxes, self.groups, self.conf_threshold = read_bbox_json(self.saved_labels, self)
+                    return
+                if self.saved_labels.endswith(".txt"):
+                    self.bboxes = read_yolo(self.saved_labels, self)
+                    return
+        except ValueError:
+            pass
+        try:
+            if self.ai_labels != None and self.ai_labels.endswith(".txt"):
+                self.bboxes = read_yolo(self.ai_labels, self)
+        except ValueError:
+            pass
             
-            try :
-                self.conf_threshold = bboxes_dict["conf"]
-            except:
-                self.conf_threshold = DEFAULT_CONF
-            
-            for bbox in bboxes_dict["bboxes"]:
-                
-                [x,y,w,h] = bbox["position"]
-                x1 = (x-w/2)*self.width
-                x2 = (x+w/2)*self.width
-                y1 = (y-h/2)*self.height
-                y2 = (y+h/2)*self.height
 
-                self.bboxes.append(BBox([x1,y1,x2,y2],parent=self, conf=bbox["conf"], group=bbox["group"], label=bbox["label"]))
-                
-                if bbox["group"] not in self.groups:
-                    self.groups.append(bbox["group"])
-            return
-        if(os.path.isfile(os.path.join(bboxes_path,self.name+".txt"))):
-            self.bboxes = []
-            txt = open(os.path.join(bboxes_path,self.name+".txt"))
-
-            #Compute bbox coordinates from yolo notation
-            for line in txt:
-                la = line.split(" ")[0:6]                                         
-                [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
-                x1 = (x-w/2)*self.width
-                x2 = (x+w/2)*self.width
-                y1 = (y-h/2)*self.height
-                y2 = (y+h/2)*self.height
-                if(len(la) == 6):
-                    c = float(la[5])
-                else:
-                    c = 1
-                self.bboxes.append(BBox([x1,y1,x2,y2],c,self))
-            txt.close()
-
-    def set_saved(self, value):
-        self.saved.set(bool(value))
+    def save(self, saved_path):
+        self.saved.set(True)
+        self.saved_path = saved_path
 
     def is_saved(self):
-        return self.saved.get()
+        return self.saved_path != None
 
 class BBox:
 
@@ -118,3 +98,51 @@ class BBox:
 
         return [x,y,w,h]
 
+def read_bbox_json(json_path, parent : EntoBox):
+    if not os.path.exists(json_path) or not json_path.endswith(".json"):
+        raise ValueError("invalid path")
+    bboxes = []
+    groups = []
+    with open(json_path, "r") as f:
+        bboxes_dict = json.load(f)
+            
+    try :
+        conf_threshold = bboxes_dict["conf"]
+    except:
+        conf_threshold = DEFAULT_CONF
+            
+    for bbox in bboxes_dict["bboxes"]:
+                
+        [x,y,w,h] = bbox["position"]
+        x1 = (x-w/2)*bboxes_dict["width"]
+        x2 = (x+w/2)*bboxes_dict["width"]
+        y1 = (y-h/2)*bboxes_dict["height"]
+        y2 = (y+h/2)*bboxes_dict["height"]
+
+        bboxes.append(BBox([x1,y1,x2,y2],parent=parent, conf=bbox["conf"], group=bbox["group"], label=bbox["label"]))
+                
+        if bbox["group"] not in groups:
+            groups.append(bbox["group"])
+    return bboxes, groups, conf_threshold
+
+def read_yolo(txt_path, parent : EntoBox):
+    if not os.path.exists(txt_path) or not txt_path.endswith(".txt"):
+        raise ValueError("invalid path")
+    bboxes = []
+    txt = open(txt_path)
+
+    #Compute bbox coordinates from yolo notation
+    for line in txt:
+        la = line.split(" ")[0:6]                                         
+        [x,y,w,h] = [float(la[1]),float(la[2]),float(la[3]),float(la[4])]
+        x1 = (x-w/2)*parent.width
+        x2 = (x+w/2)*parent.width
+        y1 = (y-h/2)*parent.height
+        y2 = (y+h/2)*parent.height
+        if(len(la) == 6):
+            c = float(la[5])
+        else:
+            c = 1
+        bboxes.append(BBox([x1,y1,x2,y2],c,parent=parent))
+    txt.close()
+    return bboxes

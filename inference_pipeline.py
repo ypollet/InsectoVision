@@ -24,7 +24,7 @@ def main(args):
     to_be_ensembled = [YOLO(x) for x in to_be_ensembled]
 
     # Prepare output directory
-    api.warn_user_if_directory_exists("output", silent=args.silent)
+    
 
     # Force detection-only mode if high-precision is enabled,
     # because high-precision already uses the classifier's predictions in its input saliency maps,
@@ -35,11 +35,21 @@ def main(args):
     times = [] # For tracking inference times
 
     # Loop through all images in the input folder
-    for image_file in os.listdir(args.input_folder):
+    list_dir = []
+    if os.path.isdir(args.input):
+        input_folder = args.input
+        list_dir = sorted(os.listdir(args.input))
+        api.warn_user_if_directory_exists(args.output, silent=args.silent)
+    elif os.path.isfile(args.input):
+        input_folder = os.path.dirname(os.path.realpath(args.input))
+        list_dir = [os.path.basename(os.path.realpath(args.input))]
+    # else input doesn't exist
+    
+    for image_file in list_dir:
 
         start = time.time() # Start timing inference
 
-        image_path = os.path.join(args.input_folder, image_file)
+        image_path = os.path.join(input_folder, image_file)
         image = Image.open(image_path)
         image_size = image.size
 
@@ -84,7 +94,7 @@ def main(args):
 
         # Final overlap filtering across ensemble
         if not args.no_filtering:
-            pred_list = api.remove_overlapping_regions(pred_list)
+            pred_list = api.remove_overlapping_regions(pred_list, args.max_overlap)
 
         old_list = list(pred_list) # Preserves list state before posterior classification
 
@@ -131,7 +141,7 @@ def main(args):
 
         # Save predictions in YOLO format, with additional confidence level if write_conf is enabled
         api.save_yolo_format(pred_list, image_size,
-                             os.path.join("output", image_file[:-4] + ".txt"), write_conf=args.write_conf)
+                             os.path.join(args.output, image_file[:-4] + ".txt"), write_conf=args.write_conf)
 
         end = time.time()
         if not args.silent:
@@ -144,7 +154,7 @@ def main(args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="python inference_pipeline.py --input_folder my_image_folder")
+    parser = argparse.ArgumentParser(description="python inference_pipeline.py --input my_image_folder")
 
     parser.add_argument(
         "--conf",
@@ -185,10 +195,16 @@ def parse_args():
         help="Detector's input image size (default: 640)"
     )
     parser.add_argument(
-        "--input_folder",
+        "--input",
         type=str,
         required=True,
-        help="Path to the input folder"
+        help="Path to the input folder or file"
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="output",
+        help="Path to the output folder"
     )
     parser.add_argument(
         "--high_precision",

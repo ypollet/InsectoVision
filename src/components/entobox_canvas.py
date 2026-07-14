@@ -115,9 +115,12 @@ class EntoboxCanvas(CanvasImage):
                 bbox.is_selected = True
                 self.selected.append(boxid)
                 self.update_bbox_color(bbox)
+    
     def draw_all_bboxes(self):
         for bbox in self.entobox.bboxes:
             self.draw_bbox(bbox)
+            if bbox.is_selected:
+                self.selected.append(bbox.itemId)
 
     def draw_bbox(self, bbox : BBox):
         if bbox.itemId is not None or bbox.status() == Status.REJECTED:
@@ -268,6 +271,8 @@ class EntoboxCanvas(CanvasImage):
 
     def delete_bbox(self, bbox : BBox):
         self.canvas.delete(bbox.itemId, bbox.coord.first.itemId, bbox.coord.second.itemId)
+        bbox.conf = 0
+        bbox.is_selected = False
         bbox.itemId = None
         bbox.coord.first.itemId = None
         bbox.coord.second.itemId = None
