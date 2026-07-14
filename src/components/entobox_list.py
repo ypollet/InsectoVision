@@ -76,7 +76,6 @@ class EntoboxList(ttk.Frame):
     
     def configure_canvas_size(self):
         self.inner_frame.update_idletasks()
-        print(f"Configure : {min(self.inner_frame.winfo_height(), MAX_SIZE_ENTOBOX_LIST)}")
         self.canvas.configure(height=min(self.inner_frame.winfo_height(), MAX_SIZE_ENTOBOX_LIST))
         if self.inner_frame.winfo_height() < MAX_SIZE_ENTOBOX_LIST:
             self.scrollbar.grid_remove()
@@ -93,14 +92,12 @@ class EntoboxList(ttk.Frame):
     
     def add_items(self, entoboxes : list[EntoBox]):
         for entobox in entoboxes:
-            print(f"Adding {entobox.name}")
             row = EntoboxItem(self.inner_frame, entobox)
             index = len(self.rows)
             row.bind("<Double-Button-1>", lambda e, index=index: self.set_index(index))
             row.pack(fill="x")
             self.rows.append(row)
         self.configure_canvas_size()
-        print(f"After configure")
     
     def add_item(self, entobox_item : EntoboxItem):
 

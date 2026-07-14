@@ -128,7 +128,7 @@ def max_uncertainty(dataset, model, sample_size, aggregate):
     images_dir = os.path.join(dataset, "images")
     imgs = api.get_images(images_dir)
 
-    sys.argv = f"inference_pipeline.py --input_folder {images_dir} --model {model} " \
+    sys.argv = f"inference_pipeline.py --input {images_dir} --model {model} " \
                f"--detection_only --silent --write_conf".split()
     args = inference_pipeline.parse_args()
     inference_pipeline.main(args)
@@ -218,7 +218,7 @@ def diverse_sample(dataset, original_dataset, model, sample_size, seed):
 
     # Infer on the new images, to get bounding boxes
     images_dir = os.path.join(dataset, "images")
-    sys.argv = f"inference_pipeline.py --input_folder {images_dir} --model {model} " \
+    sys.argv = f"inference_pipeline.py --input {images_dir} --model {model} " \
                f"--detection_only --silent --write_conf".split()
     args = inference_pipeline.parse_args()
     inference_pipeline.main(args)
@@ -254,7 +254,7 @@ def supervised_sample(dataset, original_dataset, model, sample_size, seed, max_t
     # Run inference on original validation images
     original_val_images_dir = os.path.join(original_dataset, "val", "images")
     original_val_labels_dir = os.path.join(original_dataset, "val", "labels")
-    sys.argv = f"inference_pipeline.py --input_folder {original_val_images_dir} --model {model} " \
+    sys.argv = f"inference_pipeline.py --input {original_val_images_dir} --model {model} " \
                f"--detection_only --silent --write_conf".split()
     args = inference_pipeline.parse_args()
     inference_pipeline.main(args)
@@ -295,7 +295,7 @@ def supervised_sample(dataset, original_dataset, model, sample_size, seed, max_t
 
     # Run inference on the new dataset images
     new_images_dir = os.path.join(dataset, "images")
-    sys.argv = f"inference_pipeline.py --input_folder {new_images_dir} --model {model} " \
+    sys.argv = f"inference_pipeline.py --input {new_images_dir} --model {model} " \
                f"--detection_only --silent --write_conf".split()
     args = inference_pipeline.parse_args()
     inference_pipeline.main(args)

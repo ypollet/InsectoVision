@@ -190,7 +190,7 @@ def main(args):
 
         # Run inference on training images to get true and false predictions
         original_argv = list(sys.argv)
-        inference_args = f"inference_pipeline.py --input_folder {os.path.join(args.dataset, 'train', 'images')} " \
+        inference_args = f"inference_pipeline.py --input {os.path.join(args.dataset, 'train', 'images')} " \
                          f"--model {best_model} --conf 0.01 --img_size {args.img_size} " \
                          f"--detection_only --write_conf --silent".split()
         sys.argv = list(inference_args)
@@ -209,7 +209,7 @@ def main(args):
                                       resize_mode=args.resize_mode)
 
         # Run inference on validation images to get true and false predictions
-        inference_args = f"inference_pipeline.py --input_folder {os.path.join(args.dataset, 'val', 'images')} " \
+        inference_args = f"inference_pipeline.py --input {os.path.join(args.dataset, 'val', 'images')} " \
                          f"--model {best_model} --conf 0.01 --img_size {args.img_size} " \
                          f"--detection_only --write_conf --silent".split()
         sys.argv = list(inference_args)

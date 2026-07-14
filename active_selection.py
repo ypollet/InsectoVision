@@ -23,6 +23,7 @@ def main(args):
                          f"because this strategy needs the original training set. Please specify the path "
                          f"of your labeled dataset")
 
+    # TODO : output selection in same dataset as images, as default
     indices = subsampling_strat(args.unlabeled, args.labeled, args.model, args.size, seed)
     api.make_selection_from_indices(args.output_selection, os.path.join(args.unlabeled, "images"), indices, silent=args.silent)
     api.make_selection_from_indices(args.output_remaining,  os.path.join(args.unlabeled, "images"),

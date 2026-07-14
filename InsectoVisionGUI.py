@@ -128,7 +128,9 @@ class GUI:
         editmenu.add_command(label="Edit boxes Ctrl+E",command=self.edit_mode)
         editmenu.add_command(label="Drawing boxes Ctrl+B",command=self.draw_mode)
         editmenu.add_separator()
-        editmenu.add_command(label="Save yolo label Ctrl+S",command=self.save)
+        editmenu.add_command(label="Combine box Ctrl+D",command=self.combine)
+        editmenu.add_separator()
+        editmenu.add_command(label="Save yolo label Ctrl+S",command=self.save_current)
         editmenu.add_command(label="Crop specimens from current box",command=self.crop_current)
         editmenu.add_command(label="Summarize saved boxes",command=self.summarize)
         
@@ -565,6 +567,7 @@ class GUI:
 
         self.root.bind("<Control-e>", lambda e : self.edit_mode())
         self.root.bind("<Control-b>", lambda e : self.draw_mode())
+        self.root.bind("<Control-d>", lambda e : self.combine())
         self.root.bind("<Control-s>", lambda e : self.save_current())
 
         

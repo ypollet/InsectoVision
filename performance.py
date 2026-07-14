@@ -83,7 +83,7 @@ def main(args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="python inference_pipeline.py --input_folder my_image_folder")
+    parser = argparse.ArgumentParser(description="python inference_pipeline.py --input my_image_folder_or_file")
 
     parser.add_argument(
         "--images",

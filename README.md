@@ -106,9 +106,9 @@ In the "Edit" tab:
 
 ### Inference tool
 
-The input images folder specified in '--input_folder' must contain images in jpg format. 
+The input images folder specified in '--input' must contain images in jpg format. 
 Typical inference can be run with the following command :<br>
-`python inference_pipeline.py --input_folder my_images`<br><br>
+`python inference_pipeline.py --input my_images`<br><br>
 Several arguments can be added for a more controllable inference pipeline, and we list some of them here :
  - write_conf : this argument is recommended if you want confidence level information into your txt
                 output label files. Corresponding confidence levels will be written at the end of each 

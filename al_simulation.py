@@ -94,7 +94,7 @@ def assess_performance(images_dir, labels_dir, model, classifier, high_precision
         None
     """
     print(f"Inferring with detector {model}...\n")
-    sys.argv = f"inference_pipeline.py --input_folder {images_dir} " \
+    sys.argv = f"inference_pipeline.py --input {images_dir} " \
                f"--silent --model {model} --detection_only --write_conf".split()
     args = inference_pipeline.parse_args()
     inference_pipeline.main(args)
@@ -106,7 +106,7 @@ def assess_performance(images_dir, labels_dir, model, classifier, high_precision
     if include_corrector:
 
         print(f"Inferring with detector {model} and corrector {classifier}...\n")
-        sys.argv = f"inference_pipeline.py --input_folder {images_dir} " \
+        sys.argv = f"inference_pipeline.py --input {images_dir} " \
                    f"--silent --model {model} --classifier {classifier} --write_conf".split()
         args = inference_pipeline.parse_args()
         inference_pipeline.main(args)
@@ -117,7 +117,7 @@ def assess_performance(images_dir, labels_dir, model, classifier, high_precision
 
     if high_precision_model is not None:
         print(f"Inferring with high_precision detector {high_precision_model}...\n")
-        sys.argv = f"inference_pipeline.py --input_folder {images_dir} --high_precision " \
+        sys.argv = f"inference_pipeline.py --input {images_dir} --high_precision " \
                    f"--silent --model {high_precision_model} --classifier {classifier} --write_conf".split()
         args = inference_pipeline.parse_args()
         inference_pipeline.main(args)
