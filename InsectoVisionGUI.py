@@ -26,6 +26,50 @@ from src.models.boxes import BBox, EntoBox
 from src.consts import *
 
 
+def _run_inference_worker(entoboxes, source_path, model, detection_only, cancel_event, progress_queue):
+    for index, entobox in enumerate(entoboxes):
+        if cancel_event.is_set():
+            break
+
+        name = entobox[0]
+        image_path = entobox[1]
+        progress_queue.put({"type": "progress", "value": index + 1, "name": name})
+
+        label_path = _run_single_inference(image_path, source_path, model, detection_only)
+        progress_queue.put({"type": "done", "name": name, "label_path": label_path})
+
+    progress_queue.put({"type": "finished"})
+
+
+def _run_single_inference(image_path, source_path, model, detection_only):
+    output_dir = os.path.join(source_path, "raw_ai_labels")
+    os.makedirs(output_dir, exist_ok=True)
+
+    sys.argv = [
+        "inference_pipeline.py",
+        "--input",
+        image_path,
+        "--output",
+        output_dir,
+        "--max_overlap",
+        str(DEFAULT_OVERLAP),
+        "--write_conf",
+        "--silent",
+        "--img_size",
+        str(DEFAULT_IMG_SIZE),
+        "--model",
+        model,
+    ]
+    if detection_only:
+        sys.argv.append("--detection_only")
+
+    args = inference_pipeline.parse_args()
+    inference_pipeline.main(args)
+
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    return os.path.join(output_dir, base_name + ".txt")
+
+
 class GUI:
 
     started = False
@@ -58,7 +102,15 @@ class GUI:
         root.title("InsectoVision")
 
         self.inference_pool = multiprocessing.Pool(1)
-        self.inference_thread = None
+        self.inference_process = None
+        self.scan_cancelled = False
+        self.cancel_event = None
+        self.progress_queue = None
+        self.progress_queue_handler = None
+        self.scan_progress_window = None
+        self.scan_progress_bar = None
+        self.scan_progress_label = None
+        self.index_label = None
 
         self.model_param_frame = ttk.Frame(root)
         self.model_param_frame.pack(fill="both", expand=True)
@@ -254,40 +306,137 @@ class GUI:
 
         return
 
-    def run_inference(self):
-        if self.inference_thread is not None and self.inference_thread.is_alive():
+    def run_inference(self, run_all=True):
+        if self.inference_process is not None and self.inference_process.is_alive():
+            return
+        if not self.entoboxes:
             return
 
-        self.root.title("InsectoVision - Scanning...")
+        self.scan_cancelled = False
+        self.cancel_event = multiprocessing.Event()
+        self.progress_queue = multiprocessing.Queue()
+        self.show_scan_progress()
 
-        def worker():
-            try:
-                for entobox in self.entoboxes:
-                    self.entobox_inference(entobox)
-            finally:
-                pass
+        entobox_specs = [(entobox.name, entobox.image) for entobox in self.entoboxes]
+        self.inference_process = multiprocessing.Process(
+            target=_run_inference_worker,
+            args=(entobox_specs, self.source_path, self.model, self.detection_only.get(), self.cancel_event, self.progress_queue),
+            daemon=True,
+        )
+        self.inference_process.start()
+        self.progress_queue_handler = self.root.after(0, self.handle_scan_notifications)
 
-        self.inference_thread = threading.Thread(target=worker, daemon=True)
-        self.inference_thread.start()
+    def show_scan_progress(self):
+        if self.scan_progress_window is not None and self.scan_progress_window.winfo_exists():
+            self.scan_progress_window.lift()
+            return
+
+        self.scan_progress_window = tk.Toplevel(self.root)
+        self.scan_progress_window.title("Scanning progress")
+        self.scan_progress_window.transient(self.root)
+        self.scan_progress_window.attributes("-topmost", True)
+
+        container = ttk.Frame(self.scan_progress_window, padding=12)
+        container.pack(fill="both", expand=True)
+
+        label_container = ttk.Frame(container)
+        label_container.pack(fill="x", expand=True)
+
+        self.scan_progress_label = ttk.Label(label_container, text="Preparing scan...")
+        self.scan_progress_label.pack(side=tk.LEFT, anchor="w", pady=(0, 8))
+
+        self.index_label = ttk.Label(label_container, text="")
+        self.index_label.pack(side=tk.RIGHT,  anchor="e", pady=(0, 8))
+
+        self.scan_progress_bar = ttk.Progressbar(container, orient="horizontal", mode="determinate", maximum=max(1, len(self.entoboxes)))
+        self.scan_progress_bar.pack(fill="x", pady=(0, 8))
+        self.scan_progress_bar['value'] = 0
+
+        cancel_button = ttk.Button(container, text="Cancel scan", command=self.cancel_scan)
+        cancel_button.pack(anchor="e")
+
+    def handle_scan_notifications(self):
+        if self.progress_queue is None:
+            self.progress_queue_handler = None
+            return
+
+        try:
+            while True:
+                message = self.progress_queue.get_nowait()
+                if message.get("type") == "progress":
+                    self.update_scan_progress(message["value"], message["name"])
+                elif message.get("type") == "done":
+                    self.update_entobox_from_output(message["name"], message["label_path"])
+                elif message.get("type") == "finished":
+                    self.close_scan_progress()
+                    self.progress_queue_handler = None
+                    return
+        except Exception:
+            pass
+
+        if self.inference_process is None or not self.inference_process.is_alive():
+            self.close_scan_progress()
+            self.progress_queue_handler = None
+            return
+
+        self.progress_queue_handler = self.root.after(10, self.handle_scan_notifications)
+
+    def update_scan_progress(self, value, name):
+        if self.scan_progress_window is None or not self.scan_progress_window.winfo_exists():
+            return
+        if self.scan_progress_bar is not None:
+            self.scan_progress_bar['value'] = value
+        if self.scan_progress_label is not None:
+            self.scan_progress_label.config(text=f"Processing image {name}")
+        if self.index_label is not None:
+            self.index_label.config(text=f"{value}/{len(self.entoboxes)}")
+
+    def close_scan_progress(self):
+        if self.progress_queue_handler is not None:
+            self.root.after_cancel(self.progress_queue_handler)
+            self.progress_queue_handler = None
+        if self.scan_progress_window is not None and self.scan_progress_window.winfo_exists():
+            self.scan_progress_window.destroy()
+        self.scan_progress_window = None
+        self.scan_progress_bar = None
+        self.scan_progress_label = None
+        self.index_label = None
+
+    def cancel_scan(self):
+        self.scan_cancelled = True
+        if self.cancel_event is not None:
+            self.cancel_event.set()
+        if self.scan_progress_label is not None:
+            self.scan_progress_label.config(text="Cancelling scan...")
+        if self.scan_progress_bar is not None:
+            self.scan_progress_bar['value'] = 0
+        if self.inference_process is not None and self.inference_process.is_alive():
+            self.inference_process.terminate()
+            self.inference_process = None
+            self.close_scan_progress()
+
+    def update_entobox_from_output(self, name, label_path):
+        for entobox in self.entoboxes:
+            if entobox.name == name:
+                entobox.ai_labels = label_path
+                if not entobox.is_saved():
+                    entobox.load_bboxes()
+                if entobox == self.current_entobox():
+                    self.root.after(0, self.canvas.redraw_all_bboxes)
+                break
             
     
-    def entobox_inference(self, entobox):
-        if False and entobox.ai_labels != None:
+    def entobox_inference(self, entobox, execute = True, update_ui = True):
+        if not execute and entobox.ai_labels != None:
             return
         print(f"Running inference for {entobox.name}")
-        sys.argv = ["inference_pipeline.py", '--input' , entobox.image, '--output' , os.path.join(self.source_path,"raw_ai_labels"), "--max_overlap", "0.8","--write_conf","--silent", "--img_size", "960", "--model"]
-        sys.argv.append(self.model)
-        if self.detection_only.get(): 
-            sys.argv.append("--detection_only")
-            
-        args = inference_pipeline.parse_args()
-        inference_pipeline.main(args)
+        label_path = _run_single_inference(entobox.image, self.source_path, self.model, self.detection_only.get())
 
-        entobox.ai_labels = os.path.join(self.source_path,"raw_ai_labels", entobox.name + ".txt")
+        entobox.ai_labels = label_path
         if not entobox.is_saved():   
             entobox.load_bboxes()
 
-        if entobox == self.current_entobox():
+        if update_ui and entobox == self.current_entobox():
             self.root.after(0, self.show_image)
 
     def quick_open(self,use_url = False):
@@ -847,7 +996,8 @@ class GUI:
         ttk.Button(tfrm,text="Ok",command=conf).grid(row=1,column=0)
 
     def on_close(self):
-        self.inference_pool.close()
+        if self.inference_process is not None and self.inference_process.is_alive():
+            self.inference_process.terminate()
         self.root.destroy()
         if os.path.exists("output"):
             rmtree("output")

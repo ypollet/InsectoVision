@@ -121,6 +121,10 @@ class EntoboxCanvas(CanvasImage):
             self.draw_bbox(bbox)
             if bbox.is_selected:
                 self.selected.append(bbox.itemId)
+    
+    def redraw_all_bboxes(self):
+        self.canvas.delete("bbox")
+        self.draw_all_bboxes()
 
     def draw_bbox(self, bbox : BBox):
         if bbox.itemId is not None or bbox.status() == Status.REJECTED:
@@ -130,7 +134,7 @@ class EntoboxCanvas(CanvasImage):
 
         x1, y1 = self.__ratio2canvas(x1, y1)
         x2, y2 = self.__ratio2canvas(x2, y2)
-        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,tags=["bbox"]) #, fill=bbox.color(), stipple="gray12")
+        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,tags=["bbox", "rectangle", bbox.id]) #, fill=bbox.color(), stipple="gray12")
         self.canvas.tag_bind(boxid, '<Button-1>', lambda e: self.select_rec(boxid, e))
         self.canvas.tag_bind(boxid, '<Control-1>', lambda e: self.select_many_rec(boxid, e))
         
@@ -139,14 +143,14 @@ class EntoboxCanvas(CanvasImage):
 
         point_id_first = self.canvas.create_oval(x1, y1,
                                     x1, y1,
-                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color())
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), tags=["bbox", "point", bbox.id])
         self.bind_points_events(point_id_first, boxid)
         bbox.coord.first.itemId = point_id_first
         self.points_id[point_id_first] = bbox.coord.first
 
         point_id_second = self.canvas.create_oval(x2, y2,
                                     x2, y2,
-                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color())
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), tags=["bbox", "point"])
         self.bind_points_events(point_id_second, boxid)
         bbox.coord.second.itemId = point_id_second
         self.points_id[point_id_second] = bbox.coord.second
@@ -270,7 +274,7 @@ class EntoboxCanvas(CanvasImage):
         self.canvas.itemconfig(bbox.coord.second.itemId, outline=color)
 
     def delete_bbox(self, bbox : BBox):
-        self.canvas.delete(bbox.itemId, bbox.coord.first.itemId, bbox.coord.second.itemId)
+        self.canvas.delete(bbox.id)
         bbox.conf = 0
         bbox.is_selected = False
         bbox.itemId = None

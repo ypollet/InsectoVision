@@ -6,6 +6,7 @@ DEFAULT_LABEL = "Insect"
 DEFAULT_MODEL = os.path.join("model","rbins_overlap.pt")
 
 DEFAULT_CONF = 0.85
+DEFAULT_OVERLAP = 0.7
 
 #Drawing reasons
 NEW_BBOX = 1

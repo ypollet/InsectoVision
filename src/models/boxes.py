@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 from src.models.coords import Coords
 from src.consts import *
 from wand.image import Image
@@ -68,6 +69,7 @@ class BBox:
     def __init__(self,coord,conf : float,parent : EntoBox, label : str = DEFAULT_LABEL, group : str = ""):
         self.parent : EntoBox = parent
 
+        self.id = str(uuid.uuid4())
         self.itemId = None
         self.label = label
         self.group = group
