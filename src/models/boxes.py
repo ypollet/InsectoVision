@@ -40,7 +40,7 @@ class EntoBox:
     def load_bboxes(self):
         print(f"Loading bboxes for {self.name} : {self.saved_labels} / {self.ai_labels}")
         try:
-            if(self.saved_labels != None):
+            if(self.is_saved()):
                 if self.saved_labels.endswith(".json"):
                     self.bboxes, self.groups, self.conf_threshold = read_bbox_json(self.saved_labels, self)
                     return
@@ -58,10 +58,10 @@ class EntoBox:
 
     def save(self, saved_path):
         self.saved.set(True)
-        self.saved_path = saved_path
+        self.saved_labels = saved_path
 
     def is_saved(self):
-        return self.saved_path != None
+        return self.saved_labels != None
 
 class BBox:
 

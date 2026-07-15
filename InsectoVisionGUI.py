@@ -1,17 +1,23 @@
 import os
 import sys
+import threading
+import multiprocessing
 import requests
-import inference_pipeline
+
 from shutil import rmtree, move
+
+from collections import defaultdict
+import pandas as pd
+import json
+import time
+
 import tkinter as tk
 from tkinter import filedialog as fd
 from tkinter import ttk
 from tkinter import StringVar
 from PIL import Image, ImageDraw, ImageFont
-from collections import defaultdict
-import pandas as pd
-import json
-import time
+
+import inference_pipeline
 
 from src.components.entobox_canvas import EntoboxCanvas
 from src.components.entobox_list import EntoboxList, EntoboxItem
@@ -50,6 +56,9 @@ class GUI:
         root.minsize(300,150)
         root.attributes('-zoomed', True)
         root.title("InsectoVision")
+
+        self.inference_pool = multiprocessing.Pool(1)
+        self.inference_thread = None
 
         self.model_param_frame = ttk.Frame(root)
         self.model_param_frame.pack(fill="both", expand=True)
@@ -246,32 +255,40 @@ class GUI:
         return
 
     def run_inference(self):
-        self.root.title("InsectoVision - " + self.entoboxes[self.current].name)
-        for entobox in self.entoboxes:
-            if entobox.ai_labels != None:
-                continue
-            print(f"Running inference for {entobox.name}")
-            sys.argv = ["inference_pipeline.py", '--input' , entobox.image, '--output' , os.path.join(self.source_path,"raw_ai_labels"), "--max_overlap", "0.8","--write_conf","--silent", "--img_size", "960", "--model"]
-            sys.argv.append(self.model)
-            if self.detection_only.get(): 
-                sys.argv.append("--detection_only")
+        if self.inference_thread is not None and self.inference_thread.is_alive():
+            return
+
+        self.root.title("InsectoVision - Scanning...")
+
+        def worker():
+            try:
+                for entobox in self.entoboxes:
+                    self.entobox_inference(entobox)
+            finally:
+                pass
+
+        self.inference_thread = threading.Thread(target=worker, daemon=True)
+        self.inference_thread.start()
             
-            #print(sys.argv)
-
-            self.root.title("InsectoVision - Scanning...")
+    
+    def entobox_inference(self, entobox):
+        if False and entobox.ai_labels != None:
+            return
+        print(f"Running inference for {entobox.name}")
+        sys.argv = ["inference_pipeline.py", '--input' , entobox.image, '--output' , os.path.join(self.source_path,"raw_ai_labels"), "--max_overlap", "0.8","--write_conf","--silent", "--img_size", "960", "--model"]
+        sys.argv.append(self.model)
+        if self.detection_only.get(): 
+            sys.argv.append("--detection_only")
             
-            args = inference_pipeline.parse_args()
-            inference_pipeline.main(args)
+        args = inference_pipeline.parse_args()
+        inference_pipeline.main(args)
 
-            
+        entobox.ai_labels = os.path.join(self.source_path,"raw_ai_labels", entobox.name + ".txt")
+        if not entobox.is_saved():   
+            entobox.load_bboxes()
 
-            entobox.ai_labels = os.path.join(self.source_path,"raw_ai_labels", entobox.name + ".txt")
-            if entobox.saved_labels == None:
-                
-                entobox.load_bboxes()
-
-            if entobox == self.current_entobox():
-                self.show_image()
+        if entobox == self.current_entobox():
+            self.root.after(0, self.show_image)
 
     def quick_open(self,use_url = False):
         if use_url:
@@ -830,6 +847,7 @@ class GUI:
         ttk.Button(tfrm,text="Ok",command=conf).grid(row=1,column=0)
 
     def on_close(self):
+        self.inference_pool.close()
         self.root.destroy()
         if os.path.exists("output"):
             rmtree("output")
