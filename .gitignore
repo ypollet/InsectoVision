@@ -16,3 +16,5 @@ train_datasets/
 model/labels_output.pt
 test_MVC.py
 .insectovision/
+classify
+new_dataset

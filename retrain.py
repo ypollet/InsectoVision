@@ -32,7 +32,7 @@ def main(args):
     # Construct arguments to launch fine-tuning training on merged dataset
     training_args = f"training_pipeline.py --dataset new_dataset --fine_tuning_steps {new_steps} " \
                      f"--model {args.model} --lr0 {args.original_lr0 * factor} --gpu {args.gpu} " \
-                    f"--epochs {new_epochs} --batch_init {args.original_batch} " \
+                    f"--epochs {new_epochs} --batch_init {args.original_batch} --img_size {args.img_size} " \
                     f"--replace_all --patience {max(new_epochs // 3, 2)} --no_split".split()
     # Add optional flags based on user input
     if args.detection_only:
@@ -47,15 +47,17 @@ def main(args):
     training_args = training_pipeline.parse_args()
     training_pipeline.main(training_args)
 
-    # Backup the trained detection model and remove temporary output
-    api.warn_user_if_file_exists("new_model.pt")
-    shutil.copy2("output.pt", "new_model.pt")
-    os.remove("output.pt")
+    if not args.classification_only:
+        # Backup the trained detection model and remove temporary output
+        api.warn_user_if_file_exists("new_model.pt")
+        shutil.copy2("output.pt", "new_model.pt")
+        os.remove("output.pt")
 
-    # Backup the trained classification model and remove temporary output
-    api.warn_user_if_file_exists("new_classifier.keras")
-    shutil.copy2("output.keras", "new_classifier.keras")
-    os.remove("output.keras")
+    if not args.detection_only:
+        # Backup the trained classification model and remove temporary output
+        api.warn_user_if_file_exists("new_classifier.keras")
+        shutil.copy2("output.keras", "new_classifier.keras")
+        os.remove("output.keras")
 
     # If doing full pipeline (not detection-only or classification-only) and high precision is requested
     if (not (args.detection_only or args.classification_only)) and args.high_precision:
