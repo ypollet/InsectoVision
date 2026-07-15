@@ -212,7 +212,7 @@ class GUI:
             self.canvas.set_to_selecting()
 
     def choose_input(self):
-        path = fd.askdirectory(initialdir="test_datasets/")
+        path = fd.askdirectory(initialdir="~/test_datasets")
 
         if not os.path.exists(os.path.join(path,"images")):
             return

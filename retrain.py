@@ -28,7 +28,7 @@ def main(args):
     original_argv = list(sys.argv)
     # Compute new epoch and step counts, scaled by the dataset factor, with lower bounds
     new_epochs = max(int(args.original_epochs * factor), 3)
-    new_steps = max(int(args.original_nb_steps * factor), 3)
+    new_steps = args.original_nb_steps #max(int(args.original_nb_steps * factor), 3)
     # Construct arguments to launch fine-tuning training on merged dataset
     training_args = f"training_pipeline.py --dataset new_dataset --fine_tuning_steps {new_steps} " \
                      f"--model {args.model} --lr0 {args.original_lr0 * factor} --gpu {args.gpu} " \
@@ -55,8 +55,8 @@ def main(args):
 
     if not args.detection_only:
         # Backup the trained classification model and remove temporary output
-        api.warn_user_if_file_exists("new_classifier.keras")
-        shutil.copy2("output.keras", "new_classifier.keras")
+        api.warn_user_if_file_exists("new_model.keras")
+        shutil.copy2("output.keras", "new_model.keras")
         os.remove("output.keras")
 
     # If doing full pipeline (not detection-only or classification-only) and high precision is requested
