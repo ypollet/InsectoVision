@@ -8,6 +8,8 @@ DEFAULT_MODEL = os.path.join("model","rbins_overlap.pt")
 DEFAULT_CONF = 0.85
 DEFAULT_OVERLAP = 0.7
 
+DEFAULT_IMG_SIZE = 960
+
 #Drawing reasons
 NEW_BBOX = 1
 NEW_TAG = 2
