@@ -28,7 +28,7 @@ def main(args):
     original_argv = list(sys.argv)
     # Compute new epoch and step counts, scaled by the dataset factor, with lower bounds
     new_epochs = max(int(args.original_epochs * factor), 3)
-    new_steps = args.original_nb_steps #max(int(args.original_nb_steps * factor), 3)
+    new_steps = max(int(args.original_nb_steps * factor), 3)
     # Construct arguments to launch fine-tuning training on merged dataset
     training_args = f"training_pipeline.py --dataset new_dataset --fine_tuning_steps {new_steps} " \
                      f"--model {args.model} --lr0 {args.original_lr0 * factor} --gpu {args.gpu} " \
