@@ -5,7 +5,7 @@ from src.models.coords import Coords
 from src.consts import *
 from wand.image import Image
 
-from tkinter import BooleanVar
+from tkinter import BooleanVar, IntVar
 
 #One image of an entomology box
 #Instance created only when images are loaded into the viewer 
@@ -32,6 +32,7 @@ class EntoBox:
         #Get the bboxes
         self.bboxes = []
         self.groups = []
+        self.times_loaded = IntVar(value=0)
         self.conf_threshold = conf_threshold
         self.ai_labels = ai_yolo_path
         self.saved_labels = saved_path
@@ -39,22 +40,27 @@ class EntoBox:
             self.load_bboxes()
 
     def load_bboxes(self):
-        print(f"Loading bboxes for {self.name} : {self.saved_labels} / {self.ai_labels}")
         try:
             if(self.is_saved()):
-                if self.saved_labels.endswith(".json"):
-                    self.bboxes, self.groups, self.conf_threshold = read_bbox_json(self.saved_labels, self)
-                    return
-                if self.saved_labels.endswith(".txt"):
-                    self.bboxes = read_yolo(self.saved_labels, self)
-                    return
+                return self.load_from_file(self.saved_labels)
+            else:
+                return self.load_from_file(self.ai_labels)
         except ValueError:
             pass
-        try:
-            if self.ai_labels != None and self.ai_labels.endswith(".txt"):
-                self.bboxes = read_yolo(self.ai_labels, self)
-        except ValueError:
-            pass
+    
+    def load_from_file(self, label_path):
+            if label_path == None:
+                return
+            if label_path.endswith(".json"):
+                self.bboxes, self.groups, self.conf_threshold = read_bbox_json(label_path, self)
+                self.times_loaded.set(self.times_loaded.get()+1)
+                print(self.times_loaded.get())
+                return
+            if label_path.endswith(".txt"):
+                self.bboxes = read_yolo(label_path, self)
+                self.times_loaded.set(self.times_loaded.get()+1)
+                print(self.times_loaded.get())
+                return
             
 
     def save(self, saved_path):

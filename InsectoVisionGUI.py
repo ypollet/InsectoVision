@@ -17,57 +17,13 @@ from tkinter import ttk
 from tkinter import StringVar
 from PIL import Image, ImageDraw, ImageFont
 
-import inference_pipeline
 
 from src.components.entobox_canvas import EntoboxCanvas
 from src.components.entobox_list import EntoboxList, EntoboxItem
 from src.components.groups_topup import GroupTopup
+from src.components.inference_window import ScanWindow, run_single_inference
 from src.models.boxes import BBox, EntoBox
 from src.consts import *
-
-
-def _run_inference_worker(entoboxes, source_path, model, detection_only, cancel_event, progress_queue):
-    for index, entobox in enumerate(entoboxes):
-        if cancel_event.is_set():
-            break
-
-        name = entobox[0]
-        image_path = entobox[1]
-        progress_queue.put({"type": "progress", "value": index + 1, "name": name})
-
-        label_path = _run_single_inference(image_path, source_path, model, detection_only)
-        progress_queue.put({"type": "done", "name": name, "label_path": label_path})
-
-    progress_queue.put({"type": "finished"})
-
-
-def _run_single_inference(image_path, source_path, model, detection_only):
-    output_dir = os.path.join(source_path, "raw_ai_labels")
-    os.makedirs(output_dir, exist_ok=True)
-
-    sys.argv = [
-        "inference_pipeline.py",
-        "--input",
-        image_path,
-        "--output",
-        output_dir,
-        "--max_overlap",
-        str(DEFAULT_OVERLAP),
-        "--write_conf",
-        "--silent",
-        "--img_size",
-        str(DEFAULT_IMG_SIZE),
-        "--model",
-        model,
-    ]
-    if detection_only:
-        sys.argv.append("--detection_only")
-
-    args = inference_pipeline.parse_args()
-    inference_pipeline.main(args)
-
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    return os.path.join(output_dir, base_name + ".txt")
 
 
 class GUI:
@@ -101,25 +57,16 @@ class GUI:
         root.attributes('-zoomed', True)
         root.title("InsectoVision")
 
-        self.inference_pool = multiprocessing.Pool(1)
-        self.inference_process = None
-        self.scan_cancelled = False
-        self.cancel_event = None
-        self.progress_queue = None
-        self.progress_queue_handler = None
-        self.scan_progress_window = None
-        self.scan_progress_bar = None
-        self.scan_progress_label = None
-        self.index_label = None
+        self.inference_window = None
 
         self.model_param_frame = ttk.Frame(root)
-        self.model_param_frame.pack(fill="both", expand=True)
+        self.model_param_frame.pack(expand=False)
         self.param_window = None
 
         self.model_var = tk.StringVar()
-        self.model_var.set("Model: "+ self.model)
+        self.model_var.set(f"Model: {os.path.basename(self.model)}")
         
-        self.detection_only = tk.BooleanVar(value=True)
+        self.with_classification = tk.BooleanVar(value=False)
         
         self.set_param_frame(self.model_param_frame)
 
@@ -151,22 +98,23 @@ class GUI:
         self.root.mainloop()
 
     def set_param_frame(self, main_frame : ttk.Frame):
-
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
         model_label = ttk.Label(main_frame,textvariable=self.model_var)
         model_label.grid(row=0,column=0)
         ttk.Button(main_frame,text="Select model",command=lambda parent=main_frame : self.select_model(parent)).grid(row=0,column=1)
         
-        ttk.Checkbutton(main_frame,text="Post-detection classifier",variable=self.detection_only,onvalue=False,offvalue=True).grid(row=1,column=0)
-        ttk.Button(main_frame,text="Reset Default",command=self.reset_params).grid(row=2,column=0)
+        ttk.Checkbutton(main_frame,text="Post-detection classifier",variable=self.with_classification).grid(row=1,column=0, columnspan=2)
+        ttk.Button(main_frame,text="Reset Default",command=self.reset_params).grid(row=2,column=0, columnspan=2)
     
     def select_model(self, parent : ttk.Frame):
             self.model = fd.askopenfilename(parent=parent, initialdir="model",filetypes=[("PyTorch model file",".pt")])
-            self.model_var.set("Model: "+ self.model)
+            self.model_var.set(f"Model: {os.path.basename(self.model)}")
 
     def reset_params(self):
             self.model = DEFAULT_MODEL
-            self.model_var.set("Model: "+ self.model)
-            self.detection_only.set(True)
+            self.model_var.set(f"Model: {os.path.basename(self.model)}")
+            self.with_classification.set(False)
 
     def make_menubar(self):
         menubar = tk.Menu(self.root)
@@ -176,7 +124,7 @@ class GUI:
         filemenu.add_command(label="Select image folder...",command=self.choose_input)
         filemenu.add_command(label="Create folder from URL list...",command=self.choose_url_list_input)
         filemenu.add_command(label="Open selected images",command=self.load_images)
-        filemenu.add_command(label="Scan selected images",command=self.run_inference)
+        filemenu.add_command(label="Scan selected images",command=self.scan_entoboxes)
         filemenu.add_separator()
         filemenu.add_command(label="Quick open...",command=self.quick_open)
         filemenu.add_command(label="Quick open from URLs...",command= lambda : self.quick_open(use_url=True))
@@ -215,7 +163,7 @@ class GUI:
         path = fd.askdirectory(initialdir="test_datasets")
 
         if not os.path.exists(os.path.join(path,"images")):
-            return
+            return False
 
         for folder in ["labels","raw_ai_labels"]:
             if not os.path.exists(os.path.join(path,folder)):
@@ -236,11 +184,13 @@ class GUI:
         
         self.root.title("Insectovision - "+self.img_path)
 
+        return True
+
     def choose_url_list_input(self):
         
         txt_file = fd.askopenfile(mode='r',filetypes=[("Text file","*.txt")])
         if txt_file is None:
-            return
+            return False
         
         i = 1
         while os.path.exists(os.path.join(self.label_path,"downloaded_images_"+str(i))):
@@ -263,6 +213,8 @@ class GUI:
             file.write(g.content)
             file.close()
             cnt += 1
+
+        return True
     
     def load_images(self,names = None):
         if(not self.started):
@@ -306,148 +258,41 @@ class GUI:
 
         return
 
-    def run_inference(self, run_all=True):
-        if self.inference_process is not None and self.inference_process.is_alive():
-            return
+    def scan_entoboxes(self, run_all=True):
         if not self.entoboxes:
             return
-
-        self.scan_cancelled = False
-        self.cancel_event = multiprocessing.Event()
-        self.progress_queue = multiprocessing.Queue()
-        self.show_scan_progress()
-
-        entobox_specs = [(entobox.name, entobox.image) for entobox in self.entoboxes]
-        self.inference_process = multiprocessing.Process(
-            target=_run_inference_worker,
-            args=(entobox_specs, self.source_path, self.model, self.detection_only.get(), self.cancel_event, self.progress_queue),
-            daemon=True,
-        )
-        self.inference_process.start()
-        self.progress_queue_handler = self.root.after(0, self.handle_scan_notifications)
-
-    def show_scan_progress(self):
-        if self.scan_progress_window is not None and self.scan_progress_window.winfo_exists():
-            self.scan_progress_window.lift()
-            return
-
-        self.scan_progress_window = tk.Toplevel(self.root)
-        self.scan_progress_window.title("Scanning progress")
-        self.scan_progress_window.transient(self.root)
-        self.scan_progress_window.attributes("-topmost", True)
-
-        container = ttk.Frame(self.scan_progress_window, padding=12)
-        container.pack(fill="both", expand=True)
-
-        label_container = ttk.Frame(container)
-        label_container.pack(fill="x", expand=True)
-
-        self.scan_progress_label = ttk.Label(label_container, text="Preparing scan...")
-        self.scan_progress_label.pack(side=tk.LEFT, anchor="w", pady=(0, 8))
-
-        self.index_label = ttk.Label(label_container, text="")
-        self.index_label.pack(side=tk.RIGHT,  anchor="e", pady=(0, 8))
-
-        self.scan_progress_bar = ttk.Progressbar(container, orient="horizontal", mode="determinate", maximum=max(1, len(self.entoboxes)))
-        self.scan_progress_bar.pack(fill="x", pady=(0, 8))
-        self.scan_progress_bar['value'] = 0
-
-        cancel_button = ttk.Button(container, text="Cancel scan", command=self.cancel_scan)
-        cancel_button.pack(anchor="e")
-
-    def handle_scan_notifications(self):
-        if self.progress_queue is None:
-            self.progress_queue_handler = None
-            return
-
-        try:
-            while True:
-                message = self.progress_queue.get_nowait()
-                if message.get("type") == "progress":
-                    self.update_scan_progress(message["value"], message["name"])
-                elif message.get("type") == "done":
-                    self.update_entobox_from_output(message["name"], message["label_path"])
-                elif message.get("type") == "finished":
-                    self.close_scan_progress()
-                    self.progress_queue_handler = None
-                    return
-        except Exception:
-            pass
-
-        if self.inference_process is None or not self.inference_process.is_alive():
-            self.close_scan_progress()
-            self.progress_queue_handler = None
-            return
-
-        self.progress_queue_handler = self.root.after(10, self.handle_scan_notifications)
-
-    def update_scan_progress(self, value, name):
-        if self.scan_progress_window is None or not self.scan_progress_window.winfo_exists():
-            return
-        if self.scan_progress_bar is not None:
-            self.scan_progress_bar['value'] = value
-        if self.scan_progress_label is not None:
-            self.scan_progress_label.config(text=f"Processing image {name}")
-        if self.index_label is not None:
-            self.index_label.config(text=f"{value}/{len(self.entoboxes)}")
-
-    def close_scan_progress(self):
-        if self.progress_queue_handler is not None:
-            self.root.after_cancel(self.progress_queue_handler)
-            self.progress_queue_handler = None
-        if self.scan_progress_window is not None and self.scan_progress_window.winfo_exists():
-            self.scan_progress_window.destroy()
-        self.scan_progress_window = None
-        self.scan_progress_bar = None
-        self.scan_progress_label = None
-        self.index_label = None
-
-    def cancel_scan(self):
-        self.scan_cancelled = True
-        if self.cancel_event is not None:
-            self.cancel_event.set()
-        if self.scan_progress_label is not None:
-            self.scan_progress_label.config(text="Cancelling scan...")
-        if self.scan_progress_bar is not None:
-            self.scan_progress_bar['value'] = 0
-        if self.inference_process is not None and self.inference_process.is_alive():
-            self.inference_process.terminate()
-            self.inference_process = None
-            self.close_scan_progress()
-
-    def update_entobox_from_output(self, name, label_path):
-        for entobox in self.entoboxes:
-            if entobox.name == name:
-                entobox.ai_labels = label_path
-                if not entobox.is_saved():
-                    entobox.load_bboxes()
-                if entobox == self.current_entobox():
-                    self.root.after(0, self.canvas.redraw_all_bboxes)
-                break
-            
+        if self.inference_window is not None and self.inference_window.winfo_exists():
+            self.inference_window.cancel_scan()
+            self.inference_window.destroy()
+        
+        entoboxes = [x for x in self.entoboxes if x.ai_labels == None or run_all]
+        self.inference_window = ScanWindow(self.root, entoboxes, self.source_path, self.model, self.with_classification.get())
     
-    def entobox_inference(self, entobox, execute = True, update_ui = True):
-        if not execute and entobox.ai_labels != None:
+    def scan_current(self):
+        self.entobox_inference(self.current_entobox())
+    
+    def entobox_inference(self, entobox):
+        if entobox == None:
             return
         print(f"Running inference for {entobox.name}")
-        label_path = _run_single_inference(entobox.image, self.source_path, self.model, self.detection_only.get())
+        label_path = run_single_inference(entobox.image, self.source_path, self.model, self.with_classification.get())
 
         entobox.ai_labels = label_path
-        if not entobox.is_saved():   
-            entobox.load_bboxes()
+        entobox.load_from_file(label_path)
 
-        if update_ui and entobox == self.current_entobox():
-            self.root.after(0, self.show_image)
+        #self.canvas.redraw_all_bboxes
 
     def quick_open(self,use_url = False):
         if use_url:
-            self.choose_url_list_input()
+            if not self.choose_url_list_input():
+                return
         else: 
-            self.choose_input()
-        
+            if not self.choose_input():
+                return
+
         self.load_images()
         
-        self.run_inference()
+        self.scan_entoboxes(False)
 
     def open_AL(self):
         self.entoboxes = []
@@ -717,7 +562,18 @@ class GUI:
         #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
         
         row += 1
-        ttk.Label(self.controls_frame, text="").grid(column=1,row=row, columnspan=2, sticky="ew", padx=SMALL_PAD, pady=MEDIUM_PAD)
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+
+        row += 1
+        inference_frame = ttk.Frame(self.controls_frame)
+        inference_frame.grid(column=1,row=row, columnspan=2, sticky="ew", padx=SMALL_PAD)
+        self.set_param_frame(inference_frame)
+        ttk.Button(inference_frame,text="scan single",command=self.scan_current,width=BWIDTH).grid(column=0,row=3, padx=SMALL_PAD)
+        ttk.Button(inference_frame,text="scan all",command=self.scan_entoboxes,width=BWIDTH).grid(column=1,row=3, padx=SMALL_PAD)
+
+        row += 1
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+
 
         row += 1
         ttk.Label(self.controls_frame, text="List of images :", anchor="w").grid(column=1, row=row, sticky="ew")
@@ -996,8 +852,8 @@ class GUI:
         ttk.Button(tfrm,text="Ok",command=conf).grid(row=1,column=0)
 
     def on_close(self):
-        if self.inference_process is not None and self.inference_process.is_alive():
-            self.inference_process.terminate()
+        if self.inference_window is not None and self.inference_window.winfo_exists():
+            self.inference_window.destroy()
         self.root.destroy()
         if os.path.exists("output"):
             rmtree("output")

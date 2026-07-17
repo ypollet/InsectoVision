@@ -25,12 +25,13 @@ class Status(Flag):
     ACCEPTED = SURE | CONFIRMED
     NO_UPDATE = REJECTED | CONFIRMED
 
+# TODO : dark and white mode
 COLORS =    {
-                Status.SURE:"chartreuse4",
-                Status.DOUBT:"gold",
-                Status.CONFIRMED:"green2",
-                Status.REJECTED:"red",
                 Status.SELECTED:"blue",
+                Status.REJECTED:"red",
+                Status.DOUBT:"gold",
+                Status.SURE:"green1",
+                Status.CONFIRMED:"cyan",
             }
 
 

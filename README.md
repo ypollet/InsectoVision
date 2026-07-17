@@ -1,3 +1,7 @@
+This project is a fork of Insectovision, an AI Workflow for the detections of insects in entomology boxes.
+This project was developed by Tobias Löwenthal and Alexandr Usoltsev for the Master Thesis at UCLouvain in 2025.
+
+
 # InsectoVision
 Welcome to the InsectoVision github repository !
 
