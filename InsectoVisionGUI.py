@@ -160,9 +160,9 @@ class GUI:
             self.canvas.set_to_selecting()
 
     def choose_input(self):
-        path = fd.askdirectory(initialdir="~/Elliot")
-
-        if not os.path.exists(os.path.join(path,"images")):
+        path = fd.askdirectory(initialdir="test_datasets")
+        print(path)
+        if not path or not os.path.exists(os.path.join(path,"images")):
             return False
 
         for folder in ["labels","raw_ai_labels"]:
