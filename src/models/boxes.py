@@ -54,12 +54,10 @@ class EntoBox:
             if label_path.endswith(".json"):
                 self.bboxes, self.groups, self.conf_threshold = read_bbox_json(label_path, self)
                 self.times_loaded.set(self.times_loaded.get()+1)
-                print(self.times_loaded.get())
                 return
             if label_path.endswith(".txt"):
                 self.bboxes = read_yolo(label_path, self)
                 self.times_loaded.set(self.times_loaded.get()+1)
-                print(self.times_loaded.get())
                 return
             
 
