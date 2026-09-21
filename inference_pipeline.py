@@ -1,3 +1,5 @@
+import copy
+import shutil
 import warnings
 warnings.filterwarnings("ignore")
 import argparse
@@ -14,6 +16,7 @@ import time
 
 
 def main(args):
+
     # Determine whether we're working with a single model file or a directory of models
     if args.model.endswith(".pt"):
         to_be_ensembled = [args.model]
@@ -24,7 +27,8 @@ def main(args):
     to_be_ensembled = [YOLO(x) for x in to_be_ensembled]
 
     # Prepare output directory
-    
+    # also silence the prompt for internal recursive calls on a "tile" subfolder (see args.tiling below)
+    api.warn_user_if_directory_exists("output", silent=args.silent or args.input_folder.endswith("tile"))
 
     # Force detection-only mode if high-precision is enabled,
     # because high-precision already uses the classifier's predictions in its input saliency maps,
@@ -47,9 +51,11 @@ def main(args):
     
     for image_file in list_dir:
 
+        image_path = os.path.join(args.input_folder, image_file)
+        # skip non-image entries, e.g. a "tile"/"output" subfolder left over from a recursive tiling call
+        if not image_path.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
         start = time.time() # Start timing inference
-
-        image_path = os.path.join(input_folder, image_file)
         image = Image.open(image_path)
         image_size = image.size
 
@@ -88,8 +94,8 @@ def main(args):
 
             # Apply optional non-ML filtering
             if not args.no_filtering:
-                pred = api.remove_overlapping_regions(pred, args.max_overlap)
-                pred = api.filter_bboxes_zscore(pred)
+                pred = api.remove_overlapping_regions(pred)
+                #pred = api.filter_bboxes_zscore(pred)
             pred_list.extend(pred)
 
         # Final overlap filtering across ensemble
@@ -152,6 +158,67 @@ def main(args):
     if not args.silent:
         print("Average inference time on all images:", np.mean(np.asarray(times)))
 
+    if args.tiling:
+        # Recursive tiling: images whose mean detected-bbox area is too small (relative to the
+        # full image) are re-run through this same pipeline on 4 higher-resolution corner crops
+        # instead, and the crops' detections are merged back into the original image's
+        # coordinates. This block can recurse more than one level deep (tiling a tile again) if a
+        # crop is still too coarse after one round.
+        smaller_insects_indices = api.select_smaller_insect_boxes(args.input_folder, "output", bbox_area_threshold=args.min_bbox)
+
+        if len(smaller_insects_indices) == 0:
+            # Nothing (left) to tile here. If this call is itself processing a "tile" folder (we
+            # recursed at least once to get here), merge its tile-level detections back into the
+            # parent image's coordinates and hand the merged folder back up to the caller.
+            if args.input_folder.endswith("tile"):
+                if not args.silent:
+                    print("Merging tiles...")
+                return api.merge_tiles(args.input_folder, "output")
+            # Otherwise (top-level call, nothing needed tiling): nothing more to do.
+        else:
+            # Some images have detections that are too small: tile just those, then re-run
+            # detection on the tiles.
+            api.warn_user_if_directory_exists(os.path.join(args.input_folder, "tile"), silent=True, make_dir=False)
+            images, labels = api.get_images_and_labels(args.input_folder, "output")
+            selected_images = [images[i] for i in range(len(images)) if i in smaller_insects_indices]
+            selected_labels = [labels[i] for i in range(len(labels)) if i in smaller_insects_indices]
+            if not args.silent:
+                print(f"{len(selected_images)} images/tiles have small insects, tiling...")
+            api.tile(selected_images, selected_labels, args.input_folder)
+
+            # "output" is shared/global and is about to be overwritten by the recursive call
+            # below, so back up the current (full) detection results before that happens.
+            api.warn_user_if_directory_exists(os.path.join(args.input_folder, "output"), silent=True, make_dir=True)
+            api.copy_folder("output", os.path.join(args.input_folder, "output"))
+
+            # Recurse on the freshly created tile folder. write_conf is forced on because
+            # merge_tiles() needs confidence to deduplicate detections where tiles overlap.
+            args_copy = copy.copy(vars(args))
+            args_copy['input_folder'] = os.path.join(args.input_folder, "tile")
+            args_copy['write_conf'] = True
+            args_copy = argparse.Namespace(**args_copy)
+            if not args.silent:
+                print("Inferring...")
+            merged_tile_labels = main(args_copy)
+
+            # Complete the merged tile-based results (which only cover the small-bbox images)
+            # with the untouched original detections of the images that didn't need tiling.
+            api.update_labels(merged_tile_labels, os.path.join(args.input_folder, "output"))
+
+            if args.input_folder.endswith("tile"):
+                # We're inside a recursive call ourselves: our own images are tiles of a parent
+                # image, so merge them one level further up before returning.
+                if not args.silent:
+                    print("Merging tiles...")
+                return api.merge_tiles(args.input_folder, "output")
+            else:
+                # Top-level call: the backup has been folded back into "output", clean it up.
+                shutil.rmtree(os.path.join(args.input_folder, "output"))
+                # merge_tiles() always writes confidence; strip it back out if the caller didn't
+                # actually ask for it in the final output.
+                if not args.write_conf:
+                    api.remove_conf_column_folder("output")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="python inference_pipeline.py --input my_image_folder")
@@ -201,7 +268,14 @@ def parse_args():
         help="Detector's input image size (default: 640)"
     )
     parser.add_argument(
-        "--input",
+        "--min_bbox",
+        type=float,
+        default=0.01,
+        help="Minimum mean bbox area ratio relative to total image. When less, "
+             "tiling occurs to increase its size (default: 0.001)"
+    )
+    parser.add_argument(
+        "--input_folder",
         type=str,
         required=True,
         help="Path to the input folder or file"
@@ -242,6 +316,11 @@ def parse_args():
         action="store_true",
         help="Disables overlapping box NMS (based on IoSA threshold) and severe outliers suppression "
              "in terms of box area. Do not use together with an ensemble."
+    )
+    parser.add_argument(
+        "--tiling",
+        action="store_true",
+        help="Zooms in for small insects."
     )
 
     return parser.parse_args()

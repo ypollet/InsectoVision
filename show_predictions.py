@@ -9,6 +9,8 @@ def main(args):
     # Loop through all files in the provided image directory
     for i in os.listdir(args.images):
         # Load the image using OpenCV
+        if not os.path.join(args.images, i).lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
         image = cv2.imread(os.path.join(args.images, i))
 
         if args.predictions is not None:

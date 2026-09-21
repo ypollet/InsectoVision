@@ -1143,3 +1143,252 @@ def convert_valid_to_real_indices(indices, valid_images, all_images):
         list[int]: Indices of the selected valid images within `all_images`.
     """
     return [all_images.index(valid_images[i]) for i in indices]
+
+
+def select_smaller_insect_boxes(image_folder, label_folder, bbox_area_threshold=0.001, conf_threshold=0.3):
+    """
+    Flags images whose confident detections are proportionally too small, as candidates for tiling.
+
+    For each label file, the mean normalized bounding-box area (width * height, already scaled by
+    the image's own dimensions) is computed over detections above `conf_threshold`. Images whose
+    mean falls below `bbox_area_threshold` are flagged, since the detector would likely do better
+    re-run on higher-resolution tiles of these images rather than on the full, downscaled image.
+
+    Args:
+        image_folder (str): Path to the directory containing image files.
+        label_folder (str): Path to the directory containing YOLO-format label/prediction files
+            (with or without a trailing confidence column — missing confidence defaults to 1).
+        bbox_area_threshold (float): Mean normalized bbox area below which an image is flagged.
+        conf_threshold (float): Minimum confidence for a detection to count towards the mean.
+
+    Returns:
+        list[int]: Indices (into the sorted image/label lists returned by `get_images_and_labels`)
+            of the flagged images. An image with no detection above `conf_threshold` is never
+            flagged (its mean is NaN, which always compares False against the threshold).
+    """
+    _, label_files = get_images_and_labels(image_folder, label_folder)
+
+    selected_idx = []
+    for idx, label_file in enumerate(label_files):
+
+        pred_list = txt_to_tuple_list(os.path.join(label_folder, label_file))
+        if len(pred_list) == 0:
+            continue
+        if len(pred_list[0]) == 4:
+            pred_list = [x + (1,) for x in pred_list]
+
+        bbox_areas = [w*h for _,_,w,h,c in pred_list if c > conf_threshold]
+        bbox_mean = np.mean(bbox_areas)
+        if bbox_mean < bbox_area_threshold:
+            selected_idx.append(idx)
+
+    return selected_idx
+
+def tile(images, labels, image_folder, label_folder="output", tile_folder="tile", n_tiles=2, margin_factor=2):
+    """
+    Crops 4 overlapping corner tiles out of each given image, to reduce how much small insects
+    get downscaled at inference time compared to running detection on the full image.
+
+    Each tile's dimensions are (img_w / n_tiles + margin_factor * mean_bbox_w,
+    img_h / n_tiles + margin_factor * mean_bbox_h), where mean_bbox_w/h are the average
+    width/height (in pixels) of that image's own *existing* detections in `label_folder` (not
+    ground truth — there is none at inference time). With the default n_tiles=2, each tile spans
+    more than half the image in each dimension, so the 4 corner tiles overlap at the center and
+    the whole image ends up covered. n_tiles only scales the tile size — the number of tiles is
+    always 4 (one per corner).
+
+    Only the cropped tile images are written, to `image_folder/tile_folder`; their annotations
+    are produced later by running detection on them.
+
+    Args:
+        images (list[str]): Image filenames (in `image_folder`) to tile.
+        labels (list[str]): Corresponding label filenames (in `label_folder`), used only to size
+            the tiles from that image's own detections — not copied into the tiles.
+        image_folder (str): Directory containing `images`.
+        label_folder (str): Directory containing `labels`.
+        tile_folder (str): Subdirectory of `image_folder` to create and write tiles into.
+        n_tiles (int): Divisor used to size each tile relative to the image (see above).
+        margin_factor (float): Multiplier applied to the mean bbox size when computing the margin.
+
+    Returns:
+        None
+    """
+    os.makedirs(os.path.join(image_folder, tile_folder))
+    for image_name, label_name in zip(images, labels):
+        image_path = os.path.join(image_folder, image_name)
+        label_path = os.path.join(label_folder, label_name)
+        image = cv2.imread(image_path)
+
+        pred_list = txt_to_tuple_list(label_path)
+        if len(pred_list) > 0 and len(pred_list[0]) == 4:
+            pred_list = [x + (1,) for x in pred_list]
+
+        img_w = image.shape[1]
+        img_h = image.shape[0]
+        bbox_widths = [w * img_w for _, _, w, _, _ in pred_list]
+        bbox_heights = [h * img_h for _, _, _, h, _ in pred_list]
+        mean_bw_px = np.mean(bbox_widths)
+        mean_bh_px = np.mean(bbox_heights)
+
+        crop_w = min(int(round(img_w / n_tiles + margin_factor * mean_bw_px)), img_w)
+        crop_h = min(int(round(img_h / n_tiles + margin_factor * mean_bh_px)), img_h)
+
+        corners = {
+            1: (0, 0),  # haut-gauche
+            2: (img_w - crop_w, 0),  # haut-droite
+            3: (0, img_h - crop_h),  # bas-gauche
+            4: (img_w - crop_w, img_h - crop_h),  # bas-droite
+        }
+
+        possible_ext = (".jpg", ".jpeg", ".png")
+        current_ext = ".jpg"
+        for ext in possible_ext:
+            if image_name.lower().endswith(ext):
+                current_ext = image_name[-len(ext):]
+
+        for tile_id, (x0, y0) in corners.items():
+            x1, y1 = x0 + crop_w, y0 + crop_h
+            # cv2.imwrite silently falls back to uint8 for float32 input (harmless warning, no data loss)
+            cropped_region = image[y0:y1, x0:x1].astype(np.float32)
+            cv2.imwrite(os.path.join(os.path.join(image_folder, tile_folder), image_name[:-len(current_ext)] + f"_tile{tile_id}{current_ext}"), cropped_region)
+
+
+def merge_tiles(current_input, current_output):
+    """
+    Reprojects each image's 4 tile-level predictions back into the original image's coordinate
+    system, deduplicates them (tiles overlap at the center, so the same insect can be detected
+    twice), and writes one merged label file per original image.
+
+    `current_input` (e.g. `<image_folder>/tile`, as created by `tile()`) holds the tile crops,
+    and `current_output` (e.g. "output") holds their per-tile prediction files — one .txt per
+    tile, written with a confidence column (see write_conf=True in inference_pipeline.py's
+    tiling branch), which `remove_overlapping_regions` needs to keep the best-confidence box
+    among duplicates. Images and labels are processed 4 at a time: `get_images_and_labels` sorts
+    both lists alphabetically, so a given image's 4 tiles ("<stem>_tile1" .. "_tile4") always end
+    up contiguous.
+
+    Per-tile label files are deleted as they're consumed, and the whole `current_input` tile
+    folder is removed once every group has been merged.
+
+    Args:
+        current_input (str): Directory containing the tile images (e.g. `<image_folder>/tile`).
+        current_output (str): Directory containing the tiles' prediction .txt files; also where
+            the merged per-image .txt files are written.
+
+    Returns:
+        str: `current_output`, now containing one merged, deduplicated label file per original
+            (tiled) image instead of 4 per-tile files.
+    """
+    images, labels = get_images_and_labels(current_input, current_output)
+    for idx in range(0, len(images), 4):
+
+        # "_tileN" is always 6 characters; stripping it recovers the original image's filename
+        root, ext = os.path.splitext(images[idx])
+        original_image = root[:-6] + ext
+        # tile() wrote tiles into <image_folder>/tile, so the original lives one level up
+        parent_folder = os.path.dirname(current_input)
+        original_image_path = os.path.join(parent_folder, original_image)
+        image = cv2.imread(original_image_path)
+
+        img_w = image.shape[1]
+        img_h = image.shape[0]
+
+        raw_boxes_px = []  # référentiel de l'image originale
+
+        for tile_id in range(1, 5):
+            tile_img_path = os.path.join(current_input, images[idx + tile_id - 1])
+            tile_h, tile_w = cv2.imread(tile_img_path).shape[:2]
+
+            # coin d'ancrage de la tuile, déduit de son id et de sa taille réelle
+            if tile_id == 1:
+                x0, y0 = 0, 0
+            elif tile_id == 2:
+                x0, y0 = img_w - tile_w, 0
+            elif tile_id == 3:
+                x0, y0 = 0, img_h - tile_h
+            else:
+                x0, y0 = img_w - tile_w, img_h - tile_h
+
+            # consume (and delete) this tile's raw prediction file
+            tile_label_path = os.path.join(current_output, labels[idx + tile_id - 1])
+            pred_list = txt_to_tuple_list(tile_label_path)
+            os.remove(tile_label_path)
+            if len(pred_list) > 0 and len(pred_list[0]) == 4:
+                pred_list = [x + (1,) for x in pred_list]  # default confidence to 1 if missing
+
+            # reproject each tile-local normalized box into the original image's frame: translate
+            # by the tile's corner offset (x0, y0), then renormalize by the original image's size
+            for xc, yc, w, h, conf in pred_list:
+                xc_orig = (xc * tile_w + x0) / img_w
+                yc_orig = (yc * tile_h + y0) / img_h
+                w_orig = (w * tile_w) / img_w
+                h_orig = (h * tile_h) / img_h
+                raw_boxes_px.append(yolo_to_bbox((xc_orig, yc_orig, w_orig, h_orig, conf), img_w, img_h))
+
+        merged_boxes_px = remove_overlapping_regions(raw_boxes_px)  # drop duplicates from tile overlap
+        # reuse the first tile's label name, stripped of its "_tileN" suffix, for the merged file
+        label_root, label_ext = os.path.splitext(labels[idx])
+        merged_label_path = label_root[:-6] + label_ext
+        save_yolo_format(merged_boxes_px, (img_w, img_h), os.path.join(current_output, merged_label_path), write_conf=True)
+    # every group has been merged: the tile crops and their folder are no longer needed
+    shutil.rmtree(current_input)
+    return current_output
+
+def update_labels(new_folder, old_folder):
+    """
+    Fills `new_folder` with any .txt file present in `old_folder` but missing from it.
+
+    Files already present in `new_folder` are left untouched — this only adds what's missing, it
+    never overwrites. Used to complete the merged tile-based output (`new_folder`, which only has
+    entries for the images that were tiled) with the untouched detections of the images that
+    didn't need tiling (`old_folder`, the pre-tiling backup of the full "output" directory).
+
+    Args:
+        new_folder (str): Directory to fill in.
+        old_folder (str): Directory to source missing files from.
+
+    Returns:
+        None
+    """
+    for filename in os.listdir(old_folder):
+        if not filename.endswith(".txt"):
+            continue
+        new_path = os.path.join(new_folder, filename)
+        if not os.path.isfile(new_path):
+            shutil.copyfile(os.path.join(old_folder, filename), new_path)
+
+
+def remove_conf_column(label_path):
+    """
+    Strips the trailing confidence column from a YOLO label file written with write_conf=True,
+    rewriting it in place as a standard 5-field (class, xc, yc, w, h) file.
+
+    Args:
+        label_path (str): Path to the .txt file to rewrite.
+
+    Returns:
+        None
+    """
+    with open(label_path) as f:
+        lines = f.readlines()
+    with open(label_path, "w") as f:
+        for line in lines:
+            parts = line.strip().split()
+            if not parts:
+                continue
+            f.write(" ".join(parts[:5]) + "\n")
+
+
+def remove_conf_column_folder(folder):
+    """
+    Applies `remove_conf_column` to every .txt file in `folder`.
+
+    Args:
+        folder (str): Directory of label files to strip the confidence column from.
+
+    Returns:
+        None
+    """
+    for filename in os.listdir(folder):
+        if filename.endswith(".txt"):
+            remove_conf_column(os.path.join(folder, filename))
