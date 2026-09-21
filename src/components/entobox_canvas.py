@@ -26,8 +26,8 @@ class EntoboxCanvas(CanvasImage):
         self.rec_start = None # Drawing rectangle
         self.rec_drawn = None
         self.set_to_selecting()
+        
         self.entobox.times_loaded.trace_add(mode="write", callback=lambda var, index, mode, self=self : self.redraw_all_bboxes())
-
     
     def __ratio2image(self, x, y):
         box_image = self.canvas.coords(self.container)  # get image area
@@ -135,7 +135,9 @@ class EntoboxCanvas(CanvasImage):
 
         x1, y1 = self.__ratio2canvas(x1, y1)
         x2, y2 = self.__ratio2canvas(x2, y2)
-        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,tags=["bbox", "rectangle", bbox.id, bbox.status()]) #, fill=bbox.color(), stipple="gray12")
+
+        stipple = "gray50" if bbox.status() == Status.DOUBT else ""
+        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,outlinestipple=stipple,tags=["bbox", "rectangle", bbox.id, bbox.status()]) #, fill=bbox.color(), stipple="gray12")
         self.canvas.tag_bind(boxid, '<Button-1>', lambda e: self.select_rec(boxid, e))
         self.canvas.tag_bind(boxid, '<Control-1>', lambda e: self.select_many_rec(boxid, e))
         
@@ -144,14 +146,14 @@ class EntoboxCanvas(CanvasImage):
 
         point_id_first = self.canvas.create_oval(x1, y1,
                                     x1, y1,
-                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), tags=["bbox", "point", bbox.id, bbox.status()])
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), outlinestipple=stipple, tags=["bbox", "point", bbox.id, bbox.status()])
         self.bind_points_events(point_id_first, boxid)
         bbox.coord.first.itemId = point_id_first
         self.points_id[point_id_first] = bbox.coord.first
 
         point_id_second = self.canvas.create_oval(x2, y2,
                                     x2, y2,
-                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), tags=["bbox", "point", bbox.id])
+                                    width=WIDTH_LINE * RADIUS_CIRCLE, outline=bbox.color(), outlinestipple=stipple, tags=["bbox", "point", bbox.id])
         self.bind_points_events(point_id_second, boxid)
         bbox.coord.second.itemId = point_id_second
         self.points_id[point_id_second] = bbox.coord.second
@@ -269,10 +271,10 @@ class EntoboxCanvas(CanvasImage):
             self.delete_bbox(bbox)
             return
         color = bbox.color()
-
-        self.canvas.itemconfig(bbox.itemId, outline=color, tags=["bbox", "rectangle", bbox.id, bbox.status()])
-        self.canvas.itemconfig(bbox.coord.first.itemId, outline=color, tags=["bbox", "rectangle", bbox.id, bbox.status()])
-        self.canvas.itemconfig(bbox.coord.second.itemId, outline=color, tags=["bbox", "rectangle", bbox.id, bbox.status()])
+        stipple = "gray50" if bbox.status() == Status.DOUBT else ""
+        self.canvas.itemconfig(bbox.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
+        self.canvas.itemconfig(bbox.coord.first.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
+        self.canvas.itemconfig(bbox.coord.second.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
 
     def delete_bbox(self, bbox : BBox):
         self.canvas.delete(bbox.id)
@@ -290,5 +292,9 @@ class EntoboxCanvas(CanvasImage):
         for id in self.points_id:
             self.points_id[id].itemId = None
         self.points_id : dict[int | str, Point] = dict()
+
+        # reset trace observers
+        for mode, cbname in self.entobox.times_loaded.trace_info():
+            self.entobox.times_loaded.trace_remove(mode, cbname)
 
         super().destroy()

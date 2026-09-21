@@ -4,9 +4,12 @@ from enum import Flag, auto
 
 DEFAULT_LABEL = "Insect"
 DEFAULT_MODEL = os.path.join("model","rbins_lami.pt")
+DEFAULT_DATASET_DIR = 'test_datasets'
+DEFAULT_CLASSIFICATION = False
 
-DEFAULT_CONF = 0.85
-DEFAULT_OVERLAP = 0.5
+DEFAULT_CONF = 0.5
+DEFAULT_OVERLAP = 0.75
+DEFAULT_IOU = 0.5
 
 DEFAULT_IMG_SIZE = 960
 

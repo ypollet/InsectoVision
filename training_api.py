@@ -1,5 +1,10 @@
+import argparse
+import json
 import os
 import random
+import subprocess
+import sys
+import tempfile
 
 import cv2
 import numpy as np
@@ -95,8 +100,11 @@ def make_image_and_label_array(dir):
         image_filenames = os.listdir(image_folder)  # Sorting ensures consistency
         image_filenames.sort(key=lambda f: int(f[1:-4]))
 
+        j = 0
         for filename in image_filenames:
+
             if filename.endswith((".png", ".jpg", ".jpeg", ".JPG")):  # Check for valid image formats
+                j += 1
                 img_path = os.path.join(image_folder, filename)
                 img = Image.open(img_path)  # Open image
                 img_array = np.array(img, dtype=np.float32)  # Convert to numpy array
@@ -391,3 +399,56 @@ def make_representative_split(images_dir, labels_dir, test_size, seed=seed, orig
     features = extract_features(avg_detections)
     _, indices = select_diverse_images(features, test_size, seed=seed, original_features=original_features)
     return indices
+
+
+def make_representative_split_isolated(images_dir, labels_dir, test_size, seed=seed, original_features=None):
+    """
+    Same as make_representative_split, but runs it in a short-lived subprocess instead of the calling
+    process. TensorFlow never returns GPU memory to the CUDA driver once it claims it, even after the
+    EfficientNetB0 model is deleted - so calling make_representative_split in-process would permanently
+    reserve VRAM for the rest of the caller's lifetime, starving out whatever needs it next (e.g. the
+    YOLO training subprocess retrain.py launches right after the merge step). Running it in a subprocess
+    guarantees that memory is fully released the moment it exits. The downloaded ImageNet weights stay
+    cached on disk as usual (~/.keras/models/), so repeated calls don't re-download anything - they just
+    reload from that cache into a fresh process each time.
+
+    Args:
+        Same as make_representative_split.
+
+    Returns:
+        list: Indices of selected images in the original dataset for representative split.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_path = os.path.join(tmp_dir, "indices.json")
+        command = [sys.executable, os.path.abspath(__file__),
+                  "--images_dir", images_dir, "--labels_dir", labels_dir,
+                  "--test_size", str(test_size), "--seed", str(seed),
+                  "--output_file", output_path]
+        if original_features is not None:
+            features_path = os.path.join(tmp_dir, "original_features.npy")
+            np.save(features_path, original_features)
+            command += ["--original_features_file", features_path]
+
+        subprocess.run(command, check=True)
+
+        with open(output_path) as f:
+            return json.load(f)
+
+
+if __name__ == "__main__":
+    cli_parser = argparse.ArgumentParser(
+        description="Runs make_representative_split in isolation, so the EfficientNetB0 model it loads "
+                    "is released along with this process. Used internally by make_representative_split_isolated.")
+    cli_parser.add_argument("--images_dir", required=True)
+    cli_parser.add_argument("--labels_dir", required=True)
+    cli_parser.add_argument("--test_size", type=int, required=True)
+    cli_parser.add_argument("--seed", type=int, default=seed)
+    cli_parser.add_argument("--output_file", required=True)
+    cli_parser.add_argument("--original_features_file", default=None)
+    cli_args = cli_parser.parse_args()
+
+    cli_original_features = np.load(cli_args.original_features_file) if cli_args.original_features_file else None
+    cli_indices = make_representative_split(cli_args.images_dir, cli_args.labels_dir, cli_args.test_size,
+                                            seed=cli_args.seed, original_features=cli_original_features)
+    with open(cli_args.output_file, "w") as f:
+        json.dump(list(cli_indices), f)

@@ -2,6 +2,8 @@ import os
 import sys
 import threading
 import multiprocessing
+import torch.multiprocessing as mp
+
 import requests
 
 from shutil import rmtree, move
@@ -23,6 +25,7 @@ from src.components.entobox_list import EntoboxList, EntoboxItem
 from src.components.groups_topup import GroupTopup
 from src.components.inference_window import ScanWindow, run_single_inference
 from src.models.boxes import BBox, EntoBox
+from src.models.config import Config
 from src.consts import *
 
 
@@ -59,16 +62,17 @@ class GUI:
 
         self.inference_window = None
 
+        self.config = Config()
+
         self.model_param_frame = ttk.Frame(root)
         self.model_param_frame.pack(expand=False)
         self.param_window = None
 
         self.model_var = tk.StringVar()
-        self.model_var.set(f"Model: {os.path.basename(self.model)}")
+        self.model_var.set(f"Model: {os.path.basename(self.config.model)} ")
         
-        self.with_classification = tk.BooleanVar(value=False)
         
-        self.set_param_frame(self.model_param_frame)
+        self.set_model_params_frame(self.model_param_frame)
 
         self.main_frame = ttk.Frame(root, padding=1)
         
@@ -97,24 +101,41 @@ class GUI:
         self.root.focus()
         self.root.mainloop()
 
-    def set_param_frame(self, main_frame : ttk.Frame):
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        model_label = ttk.Label(main_frame,textvariable=self.model_var)
+    def set_model_params_frame(self, param_frame : ttk.Frame):
+        param_frame.columnconfigure(0, weight=1)
+        param_frame.columnconfigure(1, weight=1)
+        model_label = ttk.Label(param_frame,textvariable=self.model_var)
         model_label.grid(row=0,column=0)
-        ttk.Button(main_frame,text="Select model",command=lambda parent=main_frame : self.select_model(parent)).grid(row=0,column=1)
+        ttk.Button(param_frame,text="Select model",command=lambda parent=param_frame : self.select_model(parent)).grid(row=0,column=1)
         
-        ttk.Checkbutton(main_frame,text="Post-detection classifier",variable=self.with_classification).grid(row=1,column=0, columnspan=2)
-        ttk.Button(main_frame,text="Reset Default",command=self.reset_params).grid(row=2,column=0, columnspan=2)
+        ttk.Checkbutton(param_frame,text="Post-detection classifier",variable=self.config._classification).grid(row=1,column=0, columnspan=2)
+
+        overlap_tfrm = ttk.Frame(param_frame)
+        overlap_tfrm.grid(row=2, column=0)
+        ttk.Label(overlap_tfrm, text = "Max IosA : ").grid(row=0, column=0)
+        ttk.Entry(overlap_tfrm, textvariable=self.config._max_overlap).grid(row=0, column=1)
+
+        iou_tfrm = ttk.Frame(param_frame)
+        iou_tfrm.grid(row=2, column=1)
+        ttk.Label(iou_tfrm, text = "Max IoU : ").grid(row=0, column=0)
+        ttk.Entry(iou_tfrm, textvariable=self.config._max_iou).grid(row=0, column=1)
+        
+        ttk.Button(param_frame,text="Reset Default",command=self.reset_params).grid(row=3,column=0, columnspan=2)
     
     def select_model(self, parent : ttk.Frame):
-            self.model = fd.askopenfilename(parent=parent, initialdir="model",filetypes=[("PyTorch model file",".pt")])
-            self.model_var.set(f"Model: {os.path.basename(self.model)}")
+            initial_dir = os.path.dirname(self.config.model) if self.config.model else "model"
+            chosen = fd.askopenfilename(parent=parent, initialdir=initial_dir,filetypes=[("PyTorch model file",".pt")])
+            if not chosen:
+                return
+            self.config.model = chosen
+            self.model_var.set(f"Model: {os.path.basename(self.config.model)} ")
+            self.config.save()
 
     def reset_params(self):
-            self.model = DEFAULT_MODEL
-            self.model_var.set(f"Model: {os.path.basename(self.model)}")
-            self.with_classification.set(False)
+            self.config.reset()
+
+            self.model_var.set(f"Model: {os.path.basename(self.config.model)} ")
+
 
     def make_menubar(self):
         menubar = tk.Menu(self.root)
@@ -160,7 +181,8 @@ class GUI:
             self.canvas.set_to_selecting()
 
     def choose_input(self):
-        path = fd.askdirectory(initialdir="test_datasets")
+        initial_dir = self.config.dataset if self.config.dataset and os.path.exists(self.config.dataset) else DEFAULT_DATASET_DIR
+        path = fd.askdirectory(initialdir=initial_dir)
         print(path)
         if not path or not os.path.exists(os.path.join(path,"images")):
             return False
@@ -175,13 +197,15 @@ class GUI:
         self.raw_path = os.path.join(path,"raw_ai_labels")
         self.source_path = path
 
+        self.config.dataset = os.path.dirname(path)
+        self.config.save()
 
         for file in os.listdir(path):
             if file.endswith(".jpg"):
                 move(os.path.join(path,file),self.img_path)
             if file.endswith(".txt"):
                 move(os.path.join(path,file),self.label_path)
-        
+
         self.root.title("Insectovision - "+self.img_path)
 
         return True
@@ -266,21 +290,41 @@ class GUI:
             self.inference_window.destroy()
         
         entoboxes = [x for x in self.entoboxes if x.ai_labels == None or run_all]
-        self.inference_window = ScanWindow(self.root, entoboxes, self.source_path, self.model, self.with_classification.get())
+        self.inference_window = ScanWindow(self.root, entoboxes, self.source_path, self.config)
     
     def scan_current(self):
         self.entobox_inference(self.current_entobox())
-    
+
     def entobox_inference(self, entobox):
         if entobox == None:
             return
         print(f"Running inference for {entobox.name}")
-        label_path = run_single_inference(entobox.image, self.source_path, self.model, self.with_classification.get())
 
+        self.scan_single_button.config(state="disabled")
+        self.scan_all_button.config(state="disabled")
+        self.scan_loading_label.grid()
+        self.scan_loading_bar.grid()
+        self.scan_loading_bar.start(10)
+
+        def worker():
+            label_path = run_single_inference(entobox.image, self.source_path, self.config.model, self.config.classification, self.config.max_overlap, self.config.max_iou)
+            self.root.after(0, lambda: self.finish_entobox_inference(entobox, label_path))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_entobox_inference(self, entobox, label_path):
         entobox.ai_labels = label_path
         entobox.load_from_file(label_path)
 
-        #self.canvas.redraw_all_bboxes
+        if entobox is self.current_entobox():
+            self.canvas.draw_all_bboxes()
+            self.update_count()
+
+        self.scan_loading_bar.stop()
+        self.scan_loading_bar.grid_remove()
+        self.scan_loading_label.grid_remove()
+        self.scan_single_button.config(state="normal")
+        self.scan_all_button.config(state="normal")
 
     def quick_open(self,use_url = False):
         if use_url:
@@ -311,7 +355,7 @@ class GUI:
         tfrm = ttk.Frame(self.param_window, padding=5)
         tfrm.grid()
 
-        self.set_param_frame(tfrm)
+        self.set_model_params_frame(tfrm)
 
         def conf_label():
             self.params_open = False
@@ -551,6 +595,25 @@ class GUI:
         ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
 
         row += 1
+        inference_frame = ttk.Frame(self.controls_frame)
+        inference_frame.grid(column=1,row=row, columnspan=2, sticky="ew", padx=SMALL_PAD)
+        self.set_model_params_frame(inference_frame)
+        self.scan_single_button = ttk.Button(inference_frame,text="scan single",command=self.scan_current,width=BWIDTH)
+        self.scan_single_button.grid(column=0,row=4, padx=SMALL_PAD)
+        self.scan_all_button = ttk.Button(inference_frame,text="scan all",command=self.scan_entoboxes,width=BWIDTH)
+        self.scan_all_button.grid(column=1,row=4, padx=SMALL_PAD)
+
+        self.scan_loading_label = ttk.Label(inference_frame, text="Scanning...", anchor="center")
+        self.scan_loading_bar = ttk.Progressbar(inference_frame, mode="indeterminate")
+        self.scan_loading_label.grid(column=0,row=4, columnspan=2, pady=(SMALL_PAD,0))
+        self.scan_loading_bar.grid(column=0,row=5, columnspan=2, sticky="ew", padx=SMALL_PAD)
+        self.scan_loading_label.grid_remove()
+        self.scan_loading_bar.grid_remove()
+
+        row += 1
+        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
+
+        row += 1
         self.save_label = ttk.Label(self.controls_frame, anchor="center")
         self.save_label.grid(column=1,row=row, columnspan=2,padx=SMALL_PAD)
 
@@ -560,16 +623,6 @@ class GUI:
 
         #row += 1
         #ttk.Button(self.controls_frame,text="Save all crops",command=self.crop_all_images,width=BWIDTH).grid(column=1,row=10, padx=SMALL_PAD)
-        
-        row += 1
-        ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
-
-        row += 1
-        inference_frame = ttk.Frame(self.controls_frame)
-        inference_frame.grid(column=1,row=row, columnspan=2, sticky="ew", padx=SMALL_PAD)
-        self.set_param_frame(inference_frame)
-        ttk.Button(inference_frame,text="scan single",command=self.scan_current,width=BWIDTH).grid(column=0,row=3, padx=SMALL_PAD)
-        ttk.Button(inference_frame,text="scan all",command=self.scan_entoboxes,width=BWIDTH).grid(column=1,row=3, padx=SMALL_PAD)
 
         row += 1
         ttk.Separator(self.controls_frame, orient="horizontal").grid(column=1,row=row, columnspan=2, sticky="ew", pady=MEDIUM_PAD)
@@ -860,5 +913,5 @@ class GUI:
 
 
 if __name__ == "__main__":
-
+    mp.set_start_method('spawn')
     gui = GUI()

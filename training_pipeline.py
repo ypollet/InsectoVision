@@ -25,6 +25,126 @@ import training_api
 
 seed = 69
 
+
+def prepare_dataset(args):
+    """
+    Splits `args.dataset`'s image/label pool into 'train' and 'val' subfolders and writes the
+    corresponding data.yaml. If `args.stabilization` is set, a fixed 1/6 fraction of the data is set
+    aside first into a 'stabilization' subfolder, never entering train/val. No-op if `args.no_split`
+    is set (the dataset is assumed to already be split).
+    """
+    if args.no_split:
+        return
+
+    # Configuration
+    dataset_dir = args.dataset
+    original_images_dir = os.path.join(dataset_dir, "images")
+    original_labels_dir = os.path.join(dataset_dir, "labels")
+    output_yaml_path = os.path.join(dataset_dir, "data.yaml")
+    class_names = ["insect"] # TODO update class names
+    val_split = 0.2
+    stabilization_split = 1 / 6
+    random.seed(seed)
+
+    # Get all image files that have matching label files
+    image_files, label_files = api.get_images_and_labels(original_images_dir, original_labels_dir)
+
+    # If stabilization, set aside a fixed fraction of the data as a stabilization set before
+    # splitting the remainder into train/val, so it never becomes eligible for training
+    stabilization_files = []
+    if args.stabilization:
+        all_len = len(image_files)
+        image_files, stabilization_files = train_test_split(
+            image_files, test_size=stabilization_split, random_state=seed)
+
+        print(f"Stab : {all_len} -> {len(image_files)}/{len(stabilization_files)}")
+
+    # Split into train and val
+    train_files, val_files = train_test_split(image_files, test_size=val_split, random_state=seed)
+    print(f"Train/val : {len(image_files)} -> {len(train_files)}/{len(val_files)}")
+    # For high-precision training, build an F-CNN from the heatmap_extractor classifier
+    fcnn = None
+    if args.heatmap_extractor is not None:
+        fcnn = api.make_fcnn(args.heatmap_extractor)
+        if args.verbose:
+            print("Preprocessing images and exctracting features for subsequent training. This may take a while... "
+                  "(+- 2 seconds per image)")
+
+    # Define function to copy files
+    def copy_files(file_list, split_type):
+        """
+        Copies samples in 'file_list' into a 'split_type' subdirectory. Puts .jpg images in an 'images' folder
+        and corresponding .txt annotation files into a 'labels' folder. If heatmap_extractor is not None
+        (high-precision training), it will copy the images' saliency maps into the target subdirectory.
+
+        Args:
+            file_list (list[str]): List of filenames, can be either jpg images or txt annotations.
+            split_type (str): Name of target subdirectory (typically 'train' and 'val')
+
+        Returns:
+            None
+        """
+        images_target = os.path.join(dataset_dir, split_type, "images")
+        labels_target = os.path.join(dataset_dir, split_type, "labels")
+        os.makedirs(images_target, exist_ok=True)
+        os.makedirs(labels_target, exist_ok=True)
+
+        for filename in file_list:
+            base = os.path.splitext(filename)[0]
+            image_src = os.path.join(original_images_dir, filename)
+            label_src = os.path.join(original_labels_dir, base + ".txt")
+
+            image_dst = os.path.join(images_target, filename)
+            label_dst = os.path.join(labels_target, base + ".txt")
+
+            # If high-precision training, compute saliency maps of images
+            if args.heatmap_extractor is not None:
+                cnn_full_img_res = 2016
+                img = Image.open(image_src)
+                img_array = np.array(img, dtype=np.float32)
+                img_shape = img_array.shape[:-1]
+                factor = np.max(img_array.shape) / cnn_full_img_res if np.max(img_array.shape) > cnn_full_img_res else 1
+                img_array = tf.image.resize(img_array,
+                                            (int(img_array.shape[0] / factor), int(img_array.shape[1] / factor)),
+                                            method=tf.image.ResizeMethod.BILINEAR)
+
+                preds = fcnn.predict(np.expand_dims(img_array, axis=0), verbose=1 if args.verbose else 0)
+                preds = np.squeeze(preds)
+
+                heatmap = training_api.extract_heatmap(img_array, np.expand_dims(preds[:, :, 1], axis=-1))
+                heatmap = tf.image.resize(heatmap, img_shape, method=tf.image.ResizeMethod.BILINEAR)
+                cv2.imwrite(image_dst, heatmap.numpy())
+            # Else, simply copy the image
+            else:
+                shutil.copy2(image_src, image_dst)
+            # Copy label
+            shutil.copy2(label_src, label_dst)
+
+    # Copy files to new structure
+    copy_files(train_files, "train")
+    copy_files(val_files, "val")
+    if args.stabilization:
+        copy_files(stabilization_files, "stabilization")
+
+    # Get absolute paths for yaml
+    train_images_abs = os.path.abspath(os.path.join(dataset_dir, "train", "images"))
+    val_images_abs = os.path.abspath(os.path.join(dataset_dir, "val", "images"))
+
+    # Write the YAML file
+    data_yaml = {
+        "train": train_images_abs,
+        "val": val_images_abs,
+        "nc": len(class_names),
+        "names": class_names
+    }
+
+    with open(output_yaml_path, "w") as f:
+        yaml.dump(data_yaml, f, sort_keys=False)
+
+    if args.verbose:
+        print(f"✅ Dataset prepared and YAML saved to: {output_yaml_path}")
+
+
 def main(args):
     # High-precision training does not need post-detection filtering
     if args.heatmap_extractor is not None:
@@ -40,102 +160,9 @@ def main(args):
     if args.batch_decrease_rate == -1:
         args.batch_decrease_rate = (args.batch_init - args.batch_min) / (args.fine_tuning_steps - 1)
 
+
     # Unless no_split is True, split dataset in train and validation and build yaml file
-    if not args.no_split:
-        # Configuration
-        dataset_dir = args.dataset
-        original_images_dir = os.path.join(dataset_dir, "images")
-        original_labels_dir = os.path.join(dataset_dir, "labels")
-        output_yaml_path = os.path.join(dataset_dir, "data.yaml")
-        class_names = ["insect"] # TODO update class names
-        val_split = 0.2
-        random.seed(seed)
-
-        # Get all image files that have matching label files
-        image_files, label_files = api.get_images_and_labels(original_images_dir, original_labels_dir)
-
-        # Split into train and val
-        train_files, val_files = train_test_split(image_files, test_size=val_split, random_state=seed)
-
-        # For high-precision training, build an F-CNN from the heatmap_extractor classifier
-        fcnn = None
-        if args.heatmap_extractor is not None:
-            fcnn = api.make_fcnn(args.heatmap_extractor)
-            if args.verbose:
-                print("Preprocessing images and exctracting features for subsequent training. This may take a while... "
-                      "(+- 2 seconds per image)")
-
-        # Define function to copy files
-        def copy_files(file_list, split_type):
-            """
-            Copies samples in 'file_list' into a 'split_type' subdirectory. Puts .jpg images in an 'images' folder
-            and corresponding .txt annotation files into a 'labels' folder. If heatmap_extractor is not None
-            (high-precision training), it will copy the images' saliency maps into the target subdirectory.
-
-            Args:
-                file_list (list[str]): List of filenames, can be either jpg images or txt annotations.
-                split_type (str): Name of target subdirectory (typically 'train' and 'val')
-
-            Returns:
-                None
-            """
-            images_target = os.path.join(dataset_dir, split_type, "images")
-            labels_target = os.path.join(dataset_dir, split_type, "labels")
-            os.makedirs(images_target, exist_ok=True)
-            os.makedirs(labels_target, exist_ok=True)
-
-            for filename in file_list:
-                base = os.path.splitext(filename)[0]
-                image_src = os.path.join(original_images_dir, filename)
-                label_src = os.path.join(original_labels_dir, base + ".txt")
-
-                image_dst = os.path.join(images_target, filename)
-                label_dst = os.path.join(labels_target, base + ".txt")
-
-                # If high-precision training, compute saliency maps of images
-                if args.heatmap_extractor is not None:
-                    cnn_full_img_res = 2016
-                    img = Image.open(image_src)
-                    img_array = np.array(img, dtype=np.float32)
-                    img_shape = img_array.shape[:-1]
-                    factor = np.max(img_array.shape) / cnn_full_img_res if np.max(img_array.shape) > cnn_full_img_res else 1
-                    img_array = tf.image.resize(img_array,
-                                                (int(img_array.shape[0] / factor), int(img_array.shape[1] / factor)),
-                                                method=tf.image.ResizeMethod.BILINEAR)
-
-                    preds = fcnn.predict(np.expand_dims(img_array, axis=0), verbose=1 if args.verbose else 0)
-                    preds = np.squeeze(preds)
-
-                    heatmap = training_api.extract_heatmap(img_array, np.expand_dims(preds[:, :, 1], axis=-1))
-                    heatmap = tf.image.resize(heatmap, img_shape, method=tf.image.ResizeMethod.BILINEAR)
-                    cv2.imwrite(image_dst, heatmap.numpy())
-                # Else, simply copy the image
-                else:
-                    shutil.copy2(image_src, image_dst)
-                # Copy label
-                shutil.copy2(label_src, label_dst)
-
-        # Copy files to new structure
-        copy_files(train_files, "train")
-        copy_files(val_files, "val")
-
-        # Get absolute paths for yaml
-        train_images_abs = os.path.abspath(os.path.join(dataset_dir, "train", "images"))
-        val_images_abs = os.path.abspath(os.path.join(dataset_dir, "val", "images"))
-
-        # Write the YAML file
-        data_yaml = {
-            "train": train_images_abs,
-            "val": val_images_abs,
-            "nc": len(class_names),
-            "names": class_names
-        }
-
-        with open(output_yaml_path, "w") as f:
-            yaml.dump(data_yaml, f, sort_keys=False)
-
-        if args.verbose:
-            print(f"✅ Dataset prepared and YAML saved to: {output_yaml_path}")
+    prepare_dataset(args)
 
     # Train the detector using dynamic multi-phase fine-tuning
     if not args.classification_only:
@@ -192,7 +219,7 @@ def main(args):
         original_argv = list(sys.argv)
         inference_args = f"inference_pipeline.py --input {os.path.join(args.dataset, 'train', 'images')} " \
                          f"--model {best_model} --conf 0.01 --img_size {args.img_size} " \
-                         f"--detection_only --write_conf --silent".split()
+                         f"--detection_only --write_conf --silent --max_overlap 0.75".split()
         sys.argv = list(inference_args)
         if args.verbose:
             print("Inferring on training dataset, may take a few seconds...")
@@ -211,7 +238,7 @@ def main(args):
         # Run inference on validation images to get true and false predictions
         inference_args = f"inference_pipeline.py --input {os.path.join(args.dataset, 'val', 'images')} " \
                          f"--model {best_model} --conf 0.01 --img_size {args.img_size} " \
-                         f"--detection_only --write_conf --silent".split()
+                         f"--detection_only --write_conf --silent --max_overlap 0.75".split()
         sys.argv = list(inference_args)
         if args.verbose:
             print("Inferring on validation dataset, may take a few seconds...")
@@ -230,12 +257,13 @@ def main(args):
         if args.verbose:
             print("Loading cropped bboxes for classification training...")
         X_train, y_train = training_api.make_image_and_label_array(os.path.join("classify", "train"))
+        print("Trained cropped bboxes Loaded ...")
         X_val, y_val = training_api.make_image_and_label_array(os.path.join("classify", "val"))
         y_train = tfk.utils.to_categorical(y_train, num_classes=2)
         y_val = tfk.utils.to_categorical(y_val, num_classes=2)
         train_label_ratios = np.sum(y_train, axis=0) / len(y_train)
         val_label_ratios = np.sum(y_val, axis=0) / len(y_val)
-
+        print("Cropped bboxes Loaded...")
         # Plot 10 random images
         # labels_txt = ["false positive", "true positive"]
         # random_indices = np.random.choice(np.arange(len(X_train)), size=10, replace=False)
@@ -306,11 +334,12 @@ def main(args):
             model.summary()
 
         # Train conv network
+        # Create child process
         conv_history = model.fit(
             x=X_train,  # We need to apply the preprocessing thought for the ConvNeXt network, which is nothing
             y=y_train,
             # class_weight=class_weight_dict,
-            batch_size=args.batch_classification,
+            batch_size=min(args.batch_min, 7),
             epochs=args.epochs_classification,
             validation_data=(X_val, y_val),  # We need to apply the preprocessing thought for the ConvNeXt network
             callbacks=[
@@ -394,7 +423,7 @@ def parse_args():
     parser.add_argument(
         "--batch_min",
         type=int,
-        default=16,
+        default=12,
         help="Minimal batch size from which it will start plateauing (default: 16)"
     )
     parser.add_argument(
@@ -497,6 +526,11 @@ def parse_args():
         default="pad",
         help="Mode of resizing of the bounding box for classification training. (default: \'pad\', "
              "mode \'bilinear\' will allow faster inference time at the cost of lower classification accuracy)"
+    )
+    parser.add_argument(
+        "--stabilization",
+        action="store_true",
+        help="If set, sets aside a stabilization set (never used for train/val) to fine-tune/validate on at some later iteration"
     )
 
     return parser.parse_args()

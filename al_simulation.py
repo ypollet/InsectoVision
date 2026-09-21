@@ -5,22 +5,24 @@ import api
 import random
 import sys
 import training_pipeline
-import retrain
+import retrain_basic
 import inference_pipeline
 import performance
 import subsample
 
-dataset = "whole_dataset"
-test_set = "Test_Set"
-seed = 69
+dataset = "train_datasets/rbins_all"
+test_set = "test_datasets/test"
+seed = 42
 random.seed(seed)
 np.random.seed(seed)
 silent = True
 iterations = 10
-ft_steps = 10
+ft_steps = 23
+original_epochs = 300
+img_size = 960
 
 
-def train(dataset, no_high_precision=True, no_split=True):
+def train(dataset, no_high_precision=True, no_split=True, epochs = 20):
     """
     Executes the full training pipeline for a given dataset, including an optional high-precision refinement step.
 
@@ -33,8 +35,10 @@ def train(dataset, no_high_precision=True, no_split=True):
     Returns:
         None
     """
+    patience = int(epochs/10)
     sys.argv = f"training_pipeline.py --dataset {dataset} " \
-               f"--verbose --replace_all --fine_tuning_steps {ft_steps}".split()
+               f"--verbose --replace_all --fine_tuning_steps {ft_steps} --epochs {epochs} " \
+               f"--patience {patience} --img_size {img_size} --detection_only".split()
     if no_split:
         sys.argv.append("--no_split")
     training_args = training_pipeline.parse_args()
@@ -43,7 +47,7 @@ def train(dataset, no_high_precision=True, no_split=True):
     api.warn_user_if_file_exists(f"{dataset}.pt", silent=silent)
     api.warn_user_if_file_exists(f"{dataset}.keras", silent=silent)
     os.rename("output.pt", f"{dataset}.pt")
-    os.rename("output.keras", f"{dataset}.keras")
+    #os.rename("output.keras", f"{dataset}.keras")
 
     if not no_high_precision:
         sys.argv = f"training_pipeline.py --dataset {dataset} --heatmap_extractor {dataset}.keras " \
@@ -142,19 +146,19 @@ def fine_tune(model, original_dataset, new_images, no_high_precision=True):
     """
     print(f"\n\nFine-tuning model {model}, which was trained with dataset {original_dataset}, "
           f"on new images {new_images}...\n\n")
-    sys.argv = f"retrain.py --dataset {original_dataset} --new_images {new_images} " \
-               f"--verbose --model {model} --original_nb_steps {ft_steps}".split()
+    sys.argv = f"retrain_basic.py --dataset {original_dataset} --new_images {new_images} --img_size {img_size} " \
+               f"--verbose --model {model} --original_nb_steps {ft_steps} --original_epochs {original_epochs} --detection_only".split()
     if not no_high_precision:
         sys.argv.append("--high_precision")
     if silent:
         sys.argv.append("--silent")
-    training_args = retrain.parse_args()
-    retrain.main(training_args)
+    training_args = retrain_basic.parse_args()
+    retrain_basic.main(training_args)
 
     api.warn_user_if_file_exists(f"{new_images}.pt", silent=silent)
-    api.warn_user_if_file_exists(f"{new_images}.keras", silent=silent)
+    #api.warn_user_if_file_exists(f"{new_images}.keras", silent=silent)
     os.rename("new_model.pt", f"{new_images}.pt")
-    os.rename("new_classifier.keras", f"{new_images}.keras")
+    #os.rename("new_classifier.keras", f"{new_images}.keras")
     if not no_high_precision:
         api.warn_user_if_file_exists(f"{new_images}_high_precision.pt", silent=silent)
         os.rename("new_high_precision_model.pt", f"{new_images}_high_precision.pt")
@@ -164,7 +168,7 @@ def fine_tune(model, original_dataset, new_images, no_high_precision=True):
 
 def merge_and_train(_, original_dataset, new_images, no_high_precision=True):
     print(f"\n\nMerging {original_dataset} with {new_images} and training normally...\n\n")
-    api.merge_datasets(original_dataset, new_images, "new_dataset", seed=seed)
+    api.merge_datasets(original_dataset, new_images, "new_dataset", replace_vale=False, seed=seed)
     shutil.rmtree(new_images)
     os.rename("new_dataset", new_images)
     train(new_images, no_high_precision=no_high_precision)
@@ -210,7 +214,7 @@ def simulate_active_learning(sampling_strategy=subsample.random_sample,
 
     # Initial model training
     if train_dataset0:
-        train("dataset0", no_high_precision=not high_precision, no_split=False)
+        train("dataset0", no_high_precision=not high_precision, no_split=False, epochs=original_epochs)
         api.warn_user_if_directory_exists("runs0", silent=silent, make_dir=False)
         shutil.move("runs", "runs0")
 
@@ -246,9 +250,9 @@ def simulate_active_learning(sampling_strategy=subsample.random_sample,
 images_dir = os.path.join(dataset, "images")
 labels_dir = os.path.join(dataset, "labels")
 test_images_dir = os.path.join(test_set, "images")
-test_labels_dir = os.path.join(test_set, "labels")
-strategies = [subsample.random_sample, subsample.max_mean_uncertainty_sample, subsample.diverse_sample, subsample.supervised_sample, subsample.uniform_partition]
-strategy_names = ["random_sample", "uncertainty", "diversity", "supervised", "uniform"]
+test_labels_dir = os.path.join(test_set, "ground_truth")
+strategies = [subsample.max_mean_uncertainty_sample]
+strategy_names = ["uncertainty"]
 
 # os.makedirs("remaining")
 # os.makedirs("remaining/images")
@@ -260,9 +264,8 @@ strategy_names = ["random_sample", "uncertainty", "diversity", "supervised", "un
 #         shutil.copy2(os.path.join(labels_dir, labels[i]), os.path.join("remaining/labels", labels[i]))
 #
 # exit()
-
 # Repeat for every subsampling strategy
-for strat_id, strat in list(enumerate(strategies)):
+"""for strat_id, strat in list(enumerate(strategies)):
     # Launch AL simulation with given subsampling strategy,
     # sampling and training initial dataset0 only for the first strategy
     simulate_active_learning(sampling_strategy=strat, training_strategy=fine_tune, train_dataset0=(strat_id == 0),
@@ -273,19 +276,19 @@ for strat_id, strat in list(enumerate(strategies)):
     for i in range(iterations):
         prefix = f"dataset{i}"
         model = prefix + ".pt"
-        classifier = prefix + ".keras"
+        #classifier = prefix + ".keras"
         if i > 0:
             shutil.move(model, os.path.join(strategy_names[strat_id], model))
-            shutil.move(classifier, os.path.join(strategy_names[strat_id], classifier))
-
+            #shutil.move(classifier, os.path.join(strategy_names[strat_id], classifier))
 # Assess performance of each AL round for every subsampling strategy
+"""
 print(f"\n### Evaluating performance of initial model trained on dataset0 ###\n".upper())
 assess_performance(test_images_dir, test_labels_dir, "dataset0.pt", "dataset0.keras", include_corrector=False)
 for strat in strategy_names:
     print(f"\n### Evaluating performance of sampling strategy {strat} ###\n".upper())
     for i in range(1, iterations):
         prefix = f"dataset{i}"
-        model = os.path.join(strat, prefix + ".pt")
-        classifier = os.path.join(strat, prefix + ".keras")
+        model = os.path.join(f"{strat}_replace", prefix + ".pt")
+        classifier = None #os.path.join(strat, prefix + ".keras")
         assess_performance(test_images_dir, test_labels_dir, model, classifier, include_corrector=False)
         print()

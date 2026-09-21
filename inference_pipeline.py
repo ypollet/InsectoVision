@@ -80,7 +80,7 @@ def main(args):
         # Run detection on each ensemble model
         for model in to_be_ensembled:
             
-            results = model.predict(source=image, conf=args.conf, imgsz=args.img_size, iou=args.max_overlap,
+            results = model.predict(source=image, conf=args.conf, imgsz=args.img_size, iou=args.max_iou,
                                     max_det=1000, verbose=args.verbose)
             pred = api.store_predictions(results)
             pred = [api.yolo_to_bbox(x, image_size[0], image_size[1]) for x in pred]
@@ -163,9 +163,15 @@ def parse_args():
         help="Confidence threshold (default: 0.01)"
     )
     parser.add_argument(
+            "--max_iou",
+            type=float,
+            default=0.5,
+            help="Maximum iou between detections (default: 1 - iou allowed)"
+        )
+    parser.add_argument(
         "--max_overlap",
         type=float,
-        default=1,
+        default=0.85,
         help="Maximum overlap between detections (default: 1 - overlap allowed)"
     )
     parser.add_argument(

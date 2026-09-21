@@ -9,10 +9,21 @@ seed = 69
 
 
 def main(args):
+
+    # CONCURRENT REHEARSAL CONTINUAL LEARNING (Not Sequential)
+
     # Warn user if "new_dataset" directory already exists, unless silent mode is active
     api.warn_user_if_directory_exists("new_dataset", silent=args.silent)
-    # Merge the original dataset with new images, using validation replacement strategy
-    S, k = api.merge_datasets(args.dataset, args.new_images, "new_dataset", seed=seed)
+    # Merge the original dataset with new images, using validation replacement strategy.
+    # If --max_old_samples is set, cap the historical training data carried forward to a
+    # diversity-sampled subset instead of replaying the full history every round (bounds
+    # training set growth across repeated retrain.py calls while still rehearsing old
+    # appearance diversity to avoid catastrophic forgetting on previously seen insect types).
+    if args.max_old_samples is not None and args.max_old_samples > 0:
+        S, k = api.merge_datasets_diverse(args.dataset, args.new_images, "new_dataset", seed=seed,
+                                          max_old_train_samples=args.max_old_samples)
+    else:
+        S, k = api.merge_datasets(args.dataset, args.new_images, "new_dataset", seed=seed)
     # Calculate scaling factor for training based on the proportion of new data (ensuring min factor of 0.01)
     factor = max(k / (S + k), 0.01)
 
@@ -32,7 +43,7 @@ def main(args):
     # Construct arguments to launch fine-tuning training on merged dataset
     training_args = f"training_pipeline.py --dataset new_dataset --fine_tuning_steps {new_steps} " \
                      f"--model {args.model} --lr0 {args.original_lr0 * factor} --gpu {args.gpu} " \
-                    f"--epochs {new_epochs} --batch_init {args.original_batch} --img_size {args.img_size} " \
+                    f"--epochs {new_epochs} --batch_init {args.original_batch} --batch_min {args.original_batch} --img_size {args.img_size} " \
                     f"--replace_all --patience {max(new_epochs // 3, 2)} --no_split".split()
     # Add optional flags based on user input
     if args.detection_only:
@@ -163,6 +174,18 @@ def parse_args():
         "--high_precision",
         action="store_true",
         help="Enables high-precision low-recall model training"
+    )
+    parser.add_argument(
+        "--max_old_samples",
+        type=float,
+        default=0.75,
+        help="If set to a positive value, bounds the amount of historical training data carried "
+             "into the merged dataset, selected via feature-based diversity sampling rather than "
+             "kept in full. A value strictly between 0 and 1 is treated as the target share of old "
+             "data in the merged training set (e.g. 0.75 aims for 75%% old / 25%% new); if the "
+             "archive doesn't hold enough old images to reach that share, all of it is kept instead "
+             "(sets are just merged). A value >= 1 is treated as an absolute image count. Set to 0 "
+             "or a negative value to disable and keep all historical data (default: 20)"
     )
 
     return parser.parse_args()

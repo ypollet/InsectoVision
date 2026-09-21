@@ -18,3 +18,11 @@ test_MVC.py
 .insectovision/
 classify
 new_dataset
+config.ini
+test_models
+runs0/
+uncertainty
+uncertainty_replace
+yolov8s.pt
+results.txt
+test_dataset.py

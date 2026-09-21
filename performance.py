@@ -117,7 +117,7 @@ def parse_args():
     parser.add_argument(
         "--max_overlap",
         type=float,
-        default=1,
+        default=0.75,
         help="Maximum overlap between detections (default: 1, which means no overlap threshold)"
     )
     parser.add_argument(

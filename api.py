@@ -2,6 +2,7 @@ import os
 import shutil
 
 import cv2
+from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tensorflow import keras as tfk
 from tensorflow.keras import layers as tfkl
@@ -777,10 +778,17 @@ def update_yaml_paths(yaml_path, new_dataset):
     print(f"Updated YAML saved to {output_yaml_path}")
 
 
-def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.8, seed=seed, replace_val=True):
+def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.8, seed=seed, replace_val=True,
+                   stabilization_ratio=1 / 6):
     """
     Merges a new dataset into an existing dataset, adjusting the train/val split according to the merging strategy specified by replace_val,
     and writes the result to a new output directory.
+
+    If `original_dataset_dir` contains a 'stabilization' subfolder (see training_pipeline.py's --continual
+    flag), it is carried forward untouched and topped up with a slice of the new data so that it keeps
+    making up `stabilization_ratio` of the entire dataset (train + val + stabilization). Images placed
+    there are removed from the pool used for the val/train distribution below, so they never become
+    eligible for training.
 
     Args:
         original_dataset_dir (str): Path to the original dataset root directory.
@@ -795,10 +803,13 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
                                       with replaced data moved to training (validation replacement strategy).
                                       Setting to false gives the standard validation split strategy.
                                       Defaults to True.
+        stabilization_ratio (float, optional): Target share of the entire dataset that the stabilization
+                                               set should make up, if one exists. Defaults to 1/6.
 
     Returns:
         tuple: (S, k) where S is the original total train+val sample count, and k is the number
-               of new samples from `new_dir`.
+               of new samples from `new_dir` that were distributed to train/val (i.e. excluding
+               any samples diverted to the stabilization set).
     """
     random.seed(seed)
 
@@ -808,6 +819,8 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
     train_path_src_labels = os.path.join(original_dataset_dir, "train", "labels")
     val_path_src_images = os.path.join(original_dataset_dir, "val", "images")
     val_path_src_labels = os.path.join(original_dataset_dir, "val", "labels")
+    stabilization_path_src_images = os.path.join(original_dataset_dir, "stabilization", "images")
+    stabilization_path_src_labels = os.path.join(original_dataset_dir, "stabilization", "labels")
     yaml_src = os.path.join(original_dataset_dir, "data.yaml")
 
     dst_images = os.path.join(output_dir, "images")
@@ -816,6 +829,8 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
     train_path_dst_labels = os.path.join(output_dir, "train", "labels")
     val_path_dst_images = os.path.join(output_dir, "val", "images")
     val_path_dst_labels = os.path.join(output_dir, "val", "labels")
+    stabilization_path_dst_images = os.path.join(output_dir, "stabilization", "images")
+    stabilization_path_dst_labels = os.path.join(output_dir, "stabilization", "labels")
 
     new_images_dir = os.path.join(new_dir, "images")
     new_labels_dir = os.path.join(new_dir, "labels")
@@ -847,6 +862,34 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
     current_val_images, current_val_labels = get_images_and_labels(val_path_src_images, val_path_src_labels)
     current_val_images, current_val_labels = shuffle_data(current_val_images, current_val_labels, seed)
 
+    # If a stabilization set exists, carry it forward untouched and top it up with a slice of the
+    # new data so it keeps making up `stabilization_ratio` of the entire dataset. Those images are
+    # then removed from the pool used for the val/train distribution below, so they're never eligible
+    # for training.
+    if os.path.isdir(stabilization_path_src_images):
+        copy_folder(stabilization_path_src_images, stabilization_path_dst_images)
+        copy_folder(stabilization_path_src_labels, stabilization_path_dst_labels)
+
+        stabilization_length_src = len(os.listdir(stabilization_path_src_images))
+        target_stabilization_size = round(stabilization_ratio * (S + stabilization_length_src + k))
+        # Claude
+        k_stabilization = min(max(target_stabilization_size - stabilization_length_src, 0), k)
+
+        for i in range(k_stabilization):
+            image_name = images_to_add[i]
+            label_name = labels_to_add[i]
+            shutil.copy2(os.path.join(new_images_dir, image_name),
+                         os.path.join(stabilization_path_dst_images, image_name))
+            shutil.copy2(os.path.join(new_labels_dir, label_name),
+                         os.path.join(stabilization_path_dst_labels, label_name))
+
+        # Remove the stabilization slice from the pool used for val/train below
+        images_to_add, labels_to_add = images_to_add[k_stabilization:], labels_to_add[k_stabilization:]
+        k -= k_stabilization
+
+    assert(len(images_to_add) == k)
+
+
     # Determine how much of the new data should go to val
     new_val_size = round((1 - new_split_ratio) * (S + k))
     dif = new_val_size - val_length_src
@@ -854,8 +897,10 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
     k_val = min(k_val, k)
 
     # Determine how many current val samples to move to train (if replacing)
-    M = round(new_split_ratio * k) if round(new_split_ratio * k) < len(current_val_images) \
-        else len(current_val_images)
+    # ??? rounding error?
+    M = k_val - (new_val_size - len(current_val_images))
+    #M = round(new_split_ratio * k) if new_split_ratio * k < S* (1-new_split_ratio) \
+    #    else round(S* (1-new_split_ratio))
 
     # Raise error if new split ratio is different from the one of previous iteration (dif > 0.1)
     if abs((val_length_src / S) - (1 - new_split_ratio)) > 0.1:
@@ -902,6 +947,185 @@ def merge_datasets(original_dataset_dir, new_dir, output_dir, new_split_ratio=0.
     if not replace_val:
         copy_folder(val_path_src_images, val_path_dst_images)
         copy_folder(val_path_src_labels, val_path_dst_labels)
+
+    return S, k
+
+
+def merge_datasets_diverse(original_dataset_dir, new_dir, output_dir, train_split_ratio=0.8, seed=seed,
+                           replace_val=True, max_old_train_samples=None):
+    """
+    Merges a new dataset into an existing dataset, like merge_datasets, but caps how much of the
+    original data is carried forward into training. Instead of replaying the full history every
+    round (which makes each retrain.py call slower than the last), it diversity-samples at most
+    `max_old_train_samples` images (via training_api.make_representative_split_isolated, which ranks
+    images by feature dissimilarity in a short-lived subprocess so its GPU memory is released before
+    returning - see that function's docstring) out of the *entire* historical archive - old train and
+    old val pooled together, via the dataset's flat root images/labels folders, which mirror that
+    union - so the training set stays bounded while still rehearsing the most representative slice of past
+    appearance diversity available, wherever it happens to have come from.
+
+    Any old val image that gets selected into this bounded training set is excluded from the
+    carried-forward validation set (it "graduates" to train), so no image ever ends up in both
+    splits at once. This replaces merge_datasets' random val<->train swap: here, which old images
+    move to train is driven entirely by the diversity criterion instead of chance. Old and new data
+    are shuffled independently (not against each other) before any copying, so the fixed val/train
+    counts stay deterministic while the specific images filling them stay randomized. Aside from
+    promotions, validation is left cumulative - topped up with new images to track the target split
+    ratio (if replace_val), but never pruned - so it keeps covering every insect type seen so far.
+
+    Args:
+        original_dataset_dir (str): Path to the original dataset root directory.
+        new_dir (str): Path to the new dataset to merge into the original dataset.
+        output_dir (str): Path to the directory where the merged dataset will be saved.
+        new_split_ratio (float, optional): Proportion of new data to add to the training set.
+                                           The rest goes to validation. Defaults to 0.8.
+        seed (int, optional): Random seed for reproducibility.
+        replace_val (bool, optional): Whether to top validation up with new images to track the
+                                      target split ratio. Defaults to True.
+        max_old_train_samples (int or float, optional): Maximum number of old images to carry into
+                                                training. If a value strictly between 0 and 1, it is
+                                                treated as the target share of old data in the merged
+                                                training set, i.e. old / (old + k) = max_old_train_samples
+                                                (so e.g. 0.75 aims for a 75% old / 25% new training set).
+                                                If the old archive doesn't contain enough images to reach
+                                                that share, all available old training data is kept
+                                                instead (validation is left untouched in that case, same
+                                                as merge_datasets minus the random swap). Otherwise
+                                                (value >= 1) it is treated as an absolute image count. If
+                                                None, or greater than or equal to the archive size, all
+                                                original training data is kept. Otherwise, a diverse
+                                                subset of the resolved size is selected from the pooled
+                                                train+val archive.
+
+    Returns:
+        tuple: (S, k) where S is the old sample count actually carried into the merged training set
+               plus the (post-promotion) validation set, and k is the number of new samples from
+               `new_dir`.
+    """
+    import training_api  # deferred: training_api imports api, so import here to avoid a circular import
+
+    random.seed(seed)
+
+    src_images = os.path.join(original_dataset_dir, "images")
+    src_labels = os.path.join(original_dataset_dir, "labels")
+    train_path_src_images = os.path.join(original_dataset_dir, "train", "images")
+    train_path_src_labels = os.path.join(original_dataset_dir, "train", "labels")
+    val_path_src_images = os.path.join(original_dataset_dir, "val", "images")
+    val_path_src_labels = os.path.join(original_dataset_dir, "val", "labels")
+    yaml_src = os.path.join(original_dataset_dir, "data.yaml")
+
+    dst_images = os.path.join(output_dir, "images")
+    dst_labels = os.path.join(output_dir, "labels")
+    train_path_dst_images = os.path.join(output_dir, "train", "images")
+    train_path_dst_labels = os.path.join(output_dir, "train", "labels")
+    val_path_dst_images = os.path.join(output_dir, "val", "images")
+    val_path_dst_labels = os.path.join(output_dir, "val", "labels")
+
+    new_images_dir = os.path.join(new_dir, "images")
+    new_labels_dir = os.path.join(new_dir, "labels")
+
+    os.makedirs(dst_images, exist_ok=True)
+    os.makedirs(dst_labels, exist_ok=True)
+    os.makedirs(train_path_dst_images, exist_ok=True)
+    os.makedirs(train_path_dst_labels, exist_ok=True)
+    os.makedirs(val_path_dst_images, exist_ok=True)
+    os.makedirs(val_path_dst_labels, exist_ok=True)
+
+    # Historical train/val listings, used to resolve which folder a pooled archive image came from
+    # and to compute the unbounded sizes needed for val-sizing/consistency math further down
+    train_images_hist, train_labels_hist = get_images_and_labels(train_path_src_images, train_path_src_labels)
+    val_images_hist, val_labels_hist = get_images_and_labels(val_path_src_images, val_path_src_labels)
+    train_hist_set = set(train_images_hist)
+    val_hist_set = set(val_images_hist)
+
+    full_train_length_src = len(train_images_hist)
+    val_length_src = len(val_images_hist)
+    full_S = full_train_length_src + val_length_src
+
+    # Get new image/label pairs (needed up front to resolve a ratio-based max_old_train_samples)
+    new_images, new_labels = get_images_and_labels(new_images_dir, new_labels_dir)
+    k = len(new_labels)
+
+    # A value strictly between 0 and 1 is the target share of old data in the merged training set,
+    # i.e. we solve old / (old + k) = ratio for old. If that requires more old images than actually
+    # exist, the ratio is not achievable by subsampling, so resolved_max_old is left above the pool
+    # size and the selection step below falls back to keeping all available old training data.
+    resolved_max_old = max_old_train_samples
+    if resolved_max_old is not None and 0 < resolved_max_old < 1:
+        resolved_max_old = round(resolved_max_old * k / (1 - resolved_max_old))
+
+    # Select which old images to carry into training: a diversity-sampled bounded subset drawn from
+    # the pooled train+val archive (feature extraction runs over the full archive, so this can take
+    # a while on large ones), or - if bounding is off or not achievable - the full old train set
+    # untouched, leaving val alone entirely.
+    archive_images, archive_labels = get_images_and_labels(src_images, src_labels)
+    if resolved_max_old is not None and resolved_max_old < len(archive_images):
+        kept_indices = training_api.make_representative_split_isolated(src_images, src_labels, resolved_max_old, seed=seed)
+        old_images = [archive_images[i] for i in kept_indices]
+        old_labels = [archive_labels[i] for i in kept_indices]
+    else:
+        old_images, old_labels = src_images, src_labels
+
+    print(f"Old dataset list {len(old_images)} from {resolved_max_old}")
+    # Shuffle the old (kept) and new selections independently before copying, so within-group
+    # ordering (e.g. diversity rank) can't bias which specific images end up where
+    old_images, old_labels = shuffle_data(old_images, old_labels, seed)
+    new_images, new_labels = shuffle_data(new_images, new_labels, seed)
+
+    print(train_split_ratio)
+    src_train_images, src_val_images, src_train_labels, src_val_labels = train_test_split(old_images, old_labels, train_size=train_split_ratio, random_state=seed)
+    new_train_images, new_val_images, new_train_labels, new_val_labels = train_test_split(new_images, new_labels, train_size=train_split_ratio, random_state=seed)
+
+    # Bounded count actually carried into the merged training set, used for the returned S below
+    train_length_src = len(src_train_images) + len(new_train_images)
+    S = train_length_src
+
+    # Copy the selected old images to the train destination
+    for image_name, label_name in zip(src_train_images, src_train_labels):
+        shutil.copy2(os.path.join(src_images, image_name),
+                     os.path.join(train_path_dst_images, image_name))
+        shutil.copy2(os.path.join(src_labels, label_name),
+                     os.path.join(train_path_dst_labels, label_name))
+
+    # Copy the selected old images to the val destination
+    for image_name, label_name in zip(src_val_images, src_val_labels):
+        shutil.copy2(os.path.join(src_images, image_name),
+                     os.path.join(val_path_dst_images, image_name))
+        shutil.copy2(os.path.join(src_labels, label_name),
+                     os.path.join(val_path_dst_labels, label_name))
+
+    # Copy the selected new images to the train destination
+    for image_name, label_name in zip(new_train_images, new_train_labels):
+        shutil.copy2(os.path.join(new_images_dir, image_name),
+                     os.path.join(train_path_dst_images, image_name))
+        shutil.copy2(os.path.join(new_labels_dir, label_name),
+                     os.path.join(train_path_dst_labels, label_name))
+
+    # Copy the selected new images to the val destination
+    for image_name, label_name in zip(new_val_images, new_val_labels):
+        shutil.copy2(os.path.join(new_images_dir, image_name),
+                     os.path.join(val_path_dst_images, image_name))
+        shutil.copy2(os.path.join(new_labels_dir, label_name),
+                     os.path.join(val_path_dst_labels, label_name))
+    
+    # Copy old data into the flat root pool
+    copy_folder(src_images, dst_images)
+    copy_folder(src_labels, dst_labels)
+    # Copy new data into the flat root pool
+    copy_folder(new_images_dir, dst_images)
+    copy_folder(new_labels_dir, dst_labels)
+
+    # Update and write the new YAML
+    update_yaml_paths(yaml_src, output_dir)
+
+    # Raise error if new split ratio is different from the one of previous iteration (dif > 0.1).
+    # Based on the full historical (unbounded, pre-promotion) sizes, so bounding doesn't distort
+    # this consistency check.
+    if abs((val_length_src / full_S) - (1 - train_split_ratio)) > 0.1:
+        raise ValueError(f"New split ratio {train_split_ratio} is too dissimilar from the previous split ratio {1 - (val_length_src / full_S)},"
+                         f"which may lead to unexpected behavior. Please specify a split ratio closer to {1 - (val_length_src / full_S)}.")
+
+    
 
     return S, k
 

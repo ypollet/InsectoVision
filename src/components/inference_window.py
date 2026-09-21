@@ -1,16 +1,18 @@
 import sys
 import os
 import multiprocessing
+import torch.multiprocessing as mp
 
 import tkinter as tk
 from tkinter import ttk
 
 from src.consts import *
 from src.models.boxes import EntoBox
+from src.models.config import Config
 
 import inference_pipeline
 
-def _run_inference_worker(entoboxes, source_path, model, with_classification, cancel_event, progress_queue):
+def _run_inference_worker(entoboxes, source_path, model, with_classification, overlap, iou, cancel_event, progress_queue):
     for index, entobox in enumerate(entoboxes):
         if cancel_event.is_set():
             break
@@ -19,13 +21,13 @@ def _run_inference_worker(entoboxes, source_path, model, with_classification, ca
         image_path = entobox[2]
         progress_queue.put({"type": "progress", "value": index + 1, "name": name})
 
-        label_path = run_single_inference(image_path, source_path, model, with_classification)
+        label_path = run_single_inference(image_path, source_path, model, with_classification, overlap, iou)
         progress_queue.put({"type": "done", "name": name, "index": index, "label_path": label_path})
 
     progress_queue.put({"type": "finished"})
 
 
-def run_single_inference(image_path, source_path, model, with_classification):
+def run_single_inference(image_path, source_path, model, with_classification, overlap, iou):
     output_dir = os.path.join(source_path, "raw_ai_labels")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -36,7 +38,9 @@ def run_single_inference(image_path, source_path, model, with_classification):
         "--output",
         output_dir,
         "--max_overlap",
-        str(DEFAULT_OVERLAP),
+        str(overlap),
+        "--max_iou",
+        str(iou),
         "--write_conf",
         "--silent",
         "--img_size",
@@ -54,14 +58,16 @@ def run_single_inference(image_path, source_path, model, with_classification):
     return os.path.join(output_dir, base_name + ".txt")
 
 class ScanWindow(tk.Toplevel):
-    def __init__(self, parent, entoboxes : list[EntoBox], source_path, model, with_classification):
+    def __init__(self, parent, entoboxes : list[EntoBox], source_path, config : Config):
         super().__init__(parent)
         self.title("Scanning progress")
         self.transient(parent)
         self.attributes("-topmost", True)
 
-        self.model = model
-        self.with_classification = with_classification
+        self.model = config.model
+        self.with_classification = config.classification
+        self.overlap = float(config.max_overlap)
+        self.iou = float(config.max_iou)
 
         self.entoboxes = entoboxes
 
@@ -86,13 +92,14 @@ class ScanWindow(tk.Toplevel):
         cancel_button = ttk.Button(self.root, text="Cancel scan", command=self.cancel_scan)
         cancel_button.pack(anchor="e")
 
+        
         self.cancel_event = multiprocessing.Event()
-        self.progress_queue = multiprocessing.Queue()
+        self.progress_queue = mp.Queue()
 
         entobox_specs = [(i, entobox.name, entobox.image) for i, entobox in enumerate(self.entoboxes)]
-        self.inference_process = multiprocessing.Process(
+        self.inference_process = mp.Process(
             target=_run_inference_worker,
-            args=(entobox_specs, self.source_path, self.model, self.with_classification, self.cancel_event, self.progress_queue),
+            args=(entobox_specs, self.source_path, self.model, self.with_classification, self.overlap, self.iou, self.cancel_event, self.progress_queue),
             daemon=True,
         )
         self.inference_process.start()
