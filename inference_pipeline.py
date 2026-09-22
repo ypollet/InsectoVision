@@ -28,7 +28,7 @@ def main(args):
 
     # Prepare output directory
     # also silence the prompt for internal recursive calls on a "tile" subfolder (see args.tiling below)
-    api.warn_user_if_directory_exists("output", silent=args.silent or args.input_folder.endswith("tile"))
+    
 
     # Force detection-only mode if high-precision is enabled,
     # because high-precision already uses the classifier's predictions in its input saliency maps,
@@ -39,19 +39,21 @@ def main(args):
     times = [] # For tracking inference times
 
     # Loop through all images in the input folder
-    list_dir = []
+    list_images = []
     if os.path.isdir(args.input):
         input_folder = args.input
-        list_dir = sorted(os.listdir(args.input))
-        api.warn_user_if_directory_exists(args.output, silent=args.silent)
+        list_images = [f"{input_folder}/{x}" for x in sorted(os.listdir(args.input))]
+        api.warn_user_if_directory_exists(args.output, silent=args.silent or args.input.endswith("tile"))
     elif os.path.isfile(args.input):
         input_folder = os.path.dirname(os.path.realpath(args.input))
-        list_dir = [os.path.basename(os.path.realpath(args.input))]
+        list_images = [os.path.realpath(args.input)]
     # else input doesn't exist
     
-    for image_file in list_dir:
-
-        image_path = os.path.join(args.input_folder, image_file)
+    # TODO : error with input and input folder
+    # TODO : log images that are tiles
+    list_labels = []
+    for image_path in list_images:
+        image_file = os.path.basename(image_path)
         # skip non-image entries, e.g. a "tile"/"output" subfolder left over from a recursive tiling call
         if not image_path.lower().endswith((".jpg", ".jpeg", ".png")):
             continue
@@ -145,9 +147,11 @@ def main(args):
             # Keep only positively classified regions
             pred_list = [old_list[i] for i in range(len(old_list)) if i in indices]
 
+        output = os.path.join(args.output, image_file[:-4] + ".txt")
+        list_labels.append(output)
         # Save predictions in YOLO format, with additional confidence level if write_conf is enabled
         api.save_yolo_format(pred_list, image_size,
-                             os.path.join(args.output, image_file[:-4] + ".txt"), write_conf=args.write_conf)
+                             output, write_conf=args.write_conf)
 
         end = time.time()
         if not args.silent:
@@ -164,37 +168,38 @@ def main(args):
         # instead, and the crops' detections are merged back into the original image's
         # coordinates. This block can recurse more than one level deep (tiling a tile again) if a
         # crop is still too coarse after one round.
-        smaller_insects_indices = api.select_smaller_insect_boxes(args.input_folder, "output", bbox_area_threshold=args.min_bbox)
+        smaller_insects_indices = api.select_smaller_insect_boxes(list_labels, bbox_area_threshold=args.min_bbox)
 
         if len(smaller_insects_indices) == 0:
             # Nothing (left) to tile here. If this call is itself processing a "tile" folder (we
             # recursed at least once to get here), merge its tile-level detections back into the
             # parent image's coordinates and hand the merged folder back up to the caller.
-            if args.input_folder.endswith("tile"):
+            if input_folder.endswith("tile"):
                 if not args.silent:
                     print("Merging tiles...")
-                return api.merge_tiles(args.input_folder, "output")
+                return api.merge_tiles(input_folder, args.output)
             # Otherwise (top-level call, nothing needed tiling): nothing more to do.
         else:
             # Some images have detections that are too small: tile just those, then re-run
             # detection on the tiles.
-            api.warn_user_if_directory_exists(os.path.join(args.input_folder, "tile"), silent=True, make_dir=False)
-            images, labels = api.get_images_and_labels(args.input_folder, "output")
-            selected_images = [images[i] for i in range(len(images)) if i in smaller_insects_indices]
-            selected_labels = [labels[i] for i in range(len(labels)) if i in smaller_insects_indices]
+            api.warn_user_if_directory_exists(os.path.join(input_folder, "tile"), silent=True, make_dir=False)
+            #images, labels = api.get_images_and_labels(input_folder, args.output)
+            selected_images = [list_images[i] for i in range(len(list_images)) if i in smaller_insects_indices]
+            selected_labels = [list_labels[i] for i in range(len(list_labels)) if i in smaller_insects_indices]
             if not args.silent:
                 print(f"{len(selected_images)} images/tiles have small insects, tiling...")
-            api.tile(selected_images, selected_labels, args.input_folder)
+            api.tile(selected_images, selected_labels, input_folder, label_folder=args.output, silent=args.silent)
 
             # "output" is shared/global and is about to be overwritten by the recursive call
             # below, so back up the current (full) detection results before that happens.
-            api.warn_user_if_directory_exists(os.path.join(args.input_folder, "output"), silent=True, make_dir=True)
-            api.copy_folder("output", os.path.join(args.input_folder, "output"))
+            api.warn_user_if_directory_exists(os.path.join(input_folder, "output"), silent=True, make_dir=True)
+            api.copy_folder(args.output, os.path.join(input_folder, "output"))
 
             # Recurse on the freshly created tile folder. write_conf is forced on because
             # merge_tiles() needs confidence to deduplicate detections where tiles overlap.
             args_copy = copy.copy(vars(args))
-            args_copy['input_folder'] = os.path.join(args.input_folder, "tile")
+            args_copy['input'] = os.path.join(input_folder, "tile")
+            args_copy['output'] = os.path.join(input_folder, "output")
             args_copy['write_conf'] = True
             args_copy = argparse.Namespace(**args_copy)
             if not args.silent:
@@ -203,17 +208,17 @@ def main(args):
 
             # Complete the merged tile-based results (which only cover the small-bbox images)
             # with the untouched original detections of the images that didn't need tiling.
-            api.update_labels(merged_tile_labels, os.path.join(args.input_folder, "output"))
+            api.update_labels(merged_tile_labels, os.path.join(input_folder, "output"))
 
-            if args.input_folder.endswith("tile"):
+            if input_folder.endswith("tile"):
                 # We're inside a recursive call ourselves: our own images are tiles of a parent
                 # image, so merge them one level further up before returning.
                 if not args.silent:
                     print("Merging tiles...")
-                return api.merge_tiles(args.input_folder, "output")
+                return api.merge_tiles(input_folder, args.output)
             else:
                 # Top-level call: the backup has been folded back into "output", clean it up.
-                shutil.rmtree(os.path.join(args.input_folder, "output"))
+                shutil.rmtree(os.path.join(input_folder, "output"))
                 # merge_tiles() always writes confidence; strip it back out if the caller didn't
                 # actually ask for it in the final output.
                 if not args.write_conf:
@@ -270,12 +275,12 @@ def parse_args():
     parser.add_argument(
         "--min_bbox",
         type=float,
-        default=0.01,
+        default=0.001,
         help="Minimum mean bbox area ratio relative to total image. When less, "
              "tiling occurs to increase its size (default: 0.001)"
     )
     parser.add_argument(
-        "--input_folder",
+        "--input",
         type=str,
         required=True,
         help="Path to the input folder or file"

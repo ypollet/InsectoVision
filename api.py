@@ -561,7 +561,8 @@ def has_corresponding_image(image_folder, label):
     Returns:
         True if image exists, else False.
     """
-    for i in os.listdir(image_folder):
+    candidates = os.listdir(image_folder)
+    for i in candidates:
         if i.startswith(label[:-4]):
             return True
     return False
@@ -581,8 +582,9 @@ def get_images_and_labels(image_folder, label_folder):
             - A list of label file names with a matching image.
     """
     image_extensions = (".jpg", ".jpeg", ".png")
+    candidate_images = os.listdir(image_folder)
     image_files = [
-        f for f in os.listdir(image_folder)
+        f for f in candidate_images
         if f.lower().endswith(image_extensions) and
            os.path.exists(os.path.join(label_folder, os.path.splitext(f)[0] + ".txt"))
     ]
@@ -1145,7 +1147,7 @@ def convert_valid_to_real_indices(indices, valid_images, all_images):
     return [all_images.index(valid_images[i]) for i in indices]
 
 
-def select_smaller_insect_boxes(image_folder, label_folder, bbox_area_threshold=0.001, conf_threshold=0.3):
+def select_smaller_insect_boxes(label_files, bbox_area_threshold=0.001, conf_threshold=0.3):
     """
     Flags images whose confident detections are proportionally too small, as candidates for tiling.
 
@@ -1166,12 +1168,11 @@ def select_smaller_insect_boxes(image_folder, label_folder, bbox_area_threshold=
             of the flagged images. An image with no detection above `conf_threshold` is never
             flagged (its mean is NaN, which always compares False against the threshold).
     """
-    _, label_files = get_images_and_labels(image_folder, label_folder)
+    #_, label_files = get_images_and_labels(image_files, label_files)
 
     selected_idx = []
     for idx, label_file in enumerate(label_files):
-
-        pred_list = txt_to_tuple_list(os.path.join(label_folder, label_file))
+        pred_list = txt_to_tuple_list(label_file)
         if len(pred_list) == 0:
             continue
         if len(pred_list[0]) == 4:
@@ -1184,7 +1185,7 @@ def select_smaller_insect_boxes(image_folder, label_folder, bbox_area_threshold=
 
     return selected_idx
 
-def tile(images, labels, image_folder, label_folder="output", tile_folder="tile", n_tiles=2, margin_factor=2):
+def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_factor=2, silent=True):
     """
     Crops 4 overlapping corner tiles out of each given image, to reduce how much small insects
     get downscaled at inference time compared to running detection on the full image.
@@ -1214,10 +1215,13 @@ def tile(images, labels, image_folder, label_folder="output", tile_folder="tile"
         None
     """
     os.makedirs(os.path.join(image_folder, tile_folder))
-    for image_name, label_name in zip(images, labels):
-        image_path = os.path.join(image_folder, image_name)
-        label_path = os.path.join(label_folder, label_name)
+    for image_path, label_path in zip(images, labels):
+        #image_path = os.path.join(image_folder, image_name)
+        #label_path = os.path.join(label_folder, label_name)
+        image_name = os.path.basename(image_path)
         image = cv2.imread(image_path)
+        if not silent:
+            print(f"Tiling {image_name}")
 
         pred_list = txt_to_tuple_list(label_path)
         if len(pred_list) > 0 and len(pred_list[0]) == 4:
