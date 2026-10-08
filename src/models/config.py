@@ -2,7 +2,7 @@ import configparser
 import os
 from tkinter import StringVar, BooleanVar
 
-from src.consts import DEFAULT_MODEL, DEFAULT_DATASET_DIR, DEFAULT_CLASSIFICATION, DEFAULT_OVERLAP, DEFAULT_IOU
+from src.consts import DEFAULT_MODEL, DEFAULT_DATASET_DIR, DEFAULT_CLASSIFICATION, DEFAULT_TILING, DEFAULT_OVERLAP, DEFAULT_IOU
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.ini")
 
@@ -16,6 +16,8 @@ class Config:
         self.dataset = DEFAULT_DATASET_DIR
         self._classification = BooleanVar(value=DEFAULT_CLASSIFICATION)
         self._classification.trace_add(mode="write", callback=lambda var, idx, mode : self.save())
+        self._tiling = BooleanVar(value=DEFAULT_TILING)
+        self._tiling.trace_add(mode="write", callback=lambda var, idx, mode : self.save())
         self._max_overlap = StringVar(value=DEFAULT_OVERLAP)
         self._max_overlap.trace_add(mode="write", callback=lambda var, idx, mode : self.save())
         self._max_iou = StringVar(value=DEFAULT_IOU)
@@ -26,6 +28,10 @@ class Config:
     @property
     def classification(self):
         return self._classification.get()
+
+    @property
+    def tiling(self):
+        return self._tiling.get()
 
     @property
     def max_overlap(self):
@@ -46,6 +52,8 @@ class Config:
                     print(parser.get(SECTION, "classification", fallback=self.classification))
                     print(self.classification)
                     self._classification.set(parser.get(SECTION, "classification", fallback=self.classification))
+                if "tiling" in parser[SECTION].keys():
+                    self._tiling.set(parser.get(SECTION, "tiling", fallback=self.tiling))
                 if "max_overlap" in parser[SECTION]:
                     self._max_overlap.set(parser.get(SECTION, "max_overlap", fallback=self.max_overlap))
                 if "max_iou" in parser[SECTION]:
@@ -66,6 +74,7 @@ class Config:
             "model": self.model or "",
             "dataset": self.dataset or "",
             "classification" : str(self.classification) or "",
+            "tiling" : str(self.tiling) or "",
             "max_overlap" : self.max_overlap or "",
             "max_iou": self.max_iou or "",
             

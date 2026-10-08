@@ -12,7 +12,7 @@ from src.models.config import Config
 
 import inference_pipeline
 
-def _run_inference_worker(entoboxes, source_path, model, with_classification, overlap, iou, cancel_event, progress_queue):
+def _run_inference_worker(entoboxes, source_path, model, with_classification, tiled, overlap, iou, cancel_event, progress_queue):
     for index, entobox in enumerate(entoboxes):
         if cancel_event.is_set():
             break
@@ -21,13 +21,13 @@ def _run_inference_worker(entoboxes, source_path, model, with_classification, ov
         image_path = entobox[2]
         progress_queue.put({"type": "progress", "value": index + 1, "name": name})
 
-        label_path = run_single_inference(image_path, source_path, model, with_classification, overlap, iou)
+        label_path = run_single_inference(image_path, source_path, model, with_classification, tiled, overlap, iou)
         progress_queue.put({"type": "done", "name": name, "index": index, "label_path": label_path})
 
     progress_queue.put({"type": "finished"})
 
 
-def run_single_inference(image_path, source_path, model, with_classification, overlap, iou):
+def run_single_inference(image_path, source_path, model, with_classification, tiled, overlap, iou):
     output_dir = os.path.join(source_path, "raw_ai_labels")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -41,13 +41,14 @@ def run_single_inference(image_path, source_path, model, with_classification, ov
         str(overlap),
         "--max_iou",
         str(iou),
-        "--tiling",
         "--write_conf",
         "--img_size",
         str(DEFAULT_IMG_SIZE),
         "--model",
         model,
     ]
+    if tiled:
+        sys.argv.append("--tiling")
     if not with_classification:
         sys.argv.append("--detection_only")
 
@@ -66,6 +67,7 @@ class ScanWindow(tk.Toplevel):
 
         self.model = config.model
         self.with_classification = config.classification
+        self.tiled = config.tiling
         self.overlap = float(config.max_overlap)
         self.iou = float(config.max_iou)
 
@@ -99,7 +101,7 @@ class ScanWindow(tk.Toplevel):
         entobox_specs = [(i, entobox.name, entobox.image) for i, entobox in enumerate(self.entoboxes)]
         self.inference_process = mp.Process(
             target=_run_inference_worker,
-            args=(entobox_specs, self.source_path, self.model, self.with_classification, self.overlap, self.iou, self.cancel_event, self.progress_queue),
+            args=(entobox_specs, self.source_path, self.model, self.with_classification, self.tiled, self.overlap, self.iou, self.cancel_event, self.progress_queue),
             daemon=True,
         )
         self.inference_process.start()

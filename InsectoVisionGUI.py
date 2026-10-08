@@ -108,7 +108,8 @@ class GUI:
         model_label.grid(row=0,column=0)
         ttk.Button(param_frame,text="Select model",command=lambda parent=param_frame : self.select_model(parent)).grid(row=0,column=1)
         
-        ttk.Checkbutton(param_frame,text="Post-detection classifier",variable=self.config._classification).grid(row=1,column=0, columnspan=2)
+        ttk.Checkbutton(param_frame,text="Post-detection classifier",variable=self.config._classification).grid(row=1,column=0)
+        ttk.Checkbutton(param_frame,text="Tiled inference",variable=self.config._tiling).grid(row=1,column=1)
 
         overlap_tfrm = ttk.Frame(param_frame)
         overlap_tfrm.grid(row=2, column=0)
@@ -307,7 +308,7 @@ class GUI:
         self.scan_loading_bar.start(10)
 
         def worker():
-            label_path = run_single_inference(entobox.image, self.source_path, self.config.model, self.config.classification, self.config.max_overlap, self.config.max_iou)
+            label_path = run_single_inference(entobox.image, self.source_path, self.config.model, self.config.classification, self.config.tiling, self.config.max_overlap, self.config.max_iou)
             self.root.after(0, lambda: self.finish_entobox_inference(entobox, label_path))
 
         threading.Thread(target=worker, daemon=True).start()

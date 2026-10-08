@@ -3,7 +3,7 @@ import os
 
 import cv2
 import api
-
+from PIL import Image
 
 def main(args):
     # Loop through all files in the provided image directory
@@ -31,10 +31,9 @@ def main(args):
             api.draw_bboxes(image, pred_list, color=(255, 0, 0), thickness=5, show_conf=not args.hide_conf)
 
         # Display image and wait for a key being pressed to close window
-        cv2.imshow(i, image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
+        img2 = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        im_pil = Image.fromarray(img2)
+        im_pil.show()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="python show_predictions.py --images my_image_folder "

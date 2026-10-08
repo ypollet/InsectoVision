@@ -6,6 +6,7 @@ DEFAULT_LABEL = "Insect"
 DEFAULT_MODEL = os.path.join("model","rbins_lami.pt")
 DEFAULT_DATASET_DIR = 'test_datasets'
 DEFAULT_CLASSIFICATION = False
+DEFAULT_TILING = False
 
 DEFAULT_CONF = 0.5
 DEFAULT_OVERLAP = 0.75

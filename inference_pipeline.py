@@ -199,7 +199,6 @@ def main(args):
             # merge_tiles() needs confidence to deduplicate detections where tiles overlap.
             args_copy = copy.copy(vars(args))
             args_copy['input'] = os.path.join(input_folder, "tile")
-            args_copy['output'] = os.path.join(input_folder, "output")
             args_copy['write_conf'] = True
             args_copy = argparse.Namespace(**args_copy)
             if not args.silent:
