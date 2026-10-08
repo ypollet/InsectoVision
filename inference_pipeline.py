@@ -188,7 +188,7 @@ def main(args):
             selected_labels = [list_labels[i] for i in range(len(list_labels)) if i in smaller_insects_indices]
             if not args.silent:
                 print(f"{len(selected_images)} images/tiles have small insects, tiling...")
-            api.tile(selected_images, selected_labels, input_folder, label_folder=args.output, silent=args.silent)
+            api.tile(selected_images, selected_labels, input_folder, silent=args.silent)
 
             # "output" is shared/global and is about to be overwritten by the recursive call
             # below, so back up the current (full) detection results before that happens.
