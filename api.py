@@ -1257,7 +1257,7 @@ def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_fac
             cv2.imwrite(os.path.join(os.path.join(image_folder, tile_folder), image_name[:-len(current_ext)] + f"_tile{tile_id}{current_ext}"), cropped_region)
 
 
-def merge_tiles(current_input, current_output):
+def merge_tiles(current_input, current_output, overlap_threshold=0.5):
     """
     Reprojects each image's 4 tile-level predictions back into the original image's coordinate
     system, deduplicates them (tiles overlap at the center, so the same insect can be detected
@@ -1329,37 +1329,31 @@ def merge_tiles(current_input, current_output):
                 h_orig = (h * tile_h) / img_h
                 raw_boxes_px.append(yolo_to_bbox((xc_orig, yc_orig, w_orig, h_orig, conf), img_w, img_h))
 
-        merged_boxes_px = remove_overlapping_regions(raw_boxes_px)  # drop duplicates from tile overlap
+        merged_boxes_px = remove_overlapping_regions(raw_boxes_px, overlap_treshold=overlap_threshold)  # drop duplicates from tile overlap
         # reuse the first tile's label name, stripped of its "_tileN" suffix, for the merged file
         label_root, label_ext = os.path.splitext(labels[idx])
         merged_label_path = label_root[:-6] + label_ext
         save_yolo_format(merged_boxes_px, (img_w, img_h), os.path.join(current_output, merged_label_path), write_conf=True)
     # every group has been merged: the tile crops and their folder are no longer needed
-    shutil.rmtree(current_input)
+    #shutil.rmtree(current_input)
     return current_output
 
-def update_labels(new_folder, old_folder):
-    """
-    Fills `new_folder` with any .txt file present in `old_folder` but missing from it.
-
-    Files already present in `new_folder` are left untouched — this only adds what's missing, it
-    never overwrites. Used to complete the merged tile-based output (`new_folder`, which only has
-    entries for the images that were tiled) with the untouched detections of the images that
-    didn't need tiling (`old_folder`, the pre-tiling backup of the full "output" directory).
-
-    Args:
-        new_folder (str): Directory to fill in.
-        old_folder (str): Directory to source missing files from.
-
-    Returns:
-        None
-    """
+def update_labels(new_folder, old_folder, overlap_threshold=0.5):
     for filename in os.listdir(old_folder):
         if not filename.endswith(".txt"):
             continue
         new_path = os.path.join(new_folder, filename)
+        old_path = os.path.join(old_folder, filename)
         if not os.path.isfile(new_path):
-            shutil.copyfile(os.path.join(old_folder, filename), new_path)
+            shutil.copyfile(old_path, new_path)
+        else:
+            # même référentiel des deux côtés (tuile parent / image d'origine), on peut donc fusionner directement
+            pred_list = txt_to_tuple_list(new_path) + txt_to_tuple_list(old_path)
+            # largeur = hauteur = 1 : les boîtes restent normalisées. Les ratios d'aire utilisés par
+            # remove_overlapping_regions ne changent pas, puisque les facteurs d'échelle par axe s'annulent.
+            boxes = [yolo_to_bbox(x, 1, 1) for x in pred_list]
+            boxes = remove_overlapping_regions(boxes, overlap_treshold=overlap_threshold)
+            save_yolo_format(boxes, (1, 1), new_path, write_conf=True)
 
 
 def remove_conf_column(label_path):

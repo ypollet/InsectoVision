@@ -52,6 +52,7 @@ def main(args):
     # TODO : error with input and input folder
     # TODO : log images that are tiles
     list_labels = []
+    list_sizes = []
     for image_path in list_images:
         image_file = os.path.basename(image_path)
         # skip non-image entries, e.g. a "tile"/"output" subfolder left over from a recursive tiling call
@@ -60,6 +61,7 @@ def main(args):
         start = time.time() # Start timing inference
         image = Image.open(image_path)
         image_size = image.size
+        list_sizes.append(image_size[:2])
 
         # If high-precision mode is requested, use FCNN heatmap visualization
         if args.high_precision:
@@ -96,7 +98,7 @@ def main(args):
 
             # Apply optional non-ML filtering
             if not args.no_filtering:
-                pred = api.remove_overlapping_regions(pred)
+                pred = api.remove_overlapping_regions(pred, args.max_overlap)
                 #pred = api.filter_bboxes_zscore(pred)
             pred_list.extend(pred)
 
@@ -151,7 +153,7 @@ def main(args):
         list_labels.append(output)
         # Save predictions in YOLO format, with additional confidence level if write_conf is enabled
         api.save_yolo_format(pred_list, image_size,
-                             output, write_conf=args.write_conf)
+                             output, write_conf=args.write_conf or args.tiling)
 
         end = time.time()
         if not args.silent:
@@ -169,6 +171,7 @@ def main(args):
         # coordinates. This block can recurse more than one level deep (tiling a tile again) if a
         # crop is still too coarse after one round.
         smaller_insects_indices = api.select_smaller_insect_boxes(list_labels, bbox_area_threshold=args.min_bbox)
+        smaller_insects_indices = [i for i in smaller_insects_indices if max(list_sizes[i]) > 2*args.img_size]
 
         if len(smaller_insects_indices) == 0:
             # Nothing (left) to tile here. If this call is itself processing a "tile" folder (we
@@ -177,13 +180,12 @@ def main(args):
             if input_folder.endswith("tile"):
                 if not args.silent:
                     print("Merging tiles...")
-                return api.merge_tiles(input_folder, args.output)
+                return api.merge_tiles(input_folder, args.output, args.max_overlap)
             # Otherwise (top-level call, nothing needed tiling): nothing more to do.
         else:
             # Some images have detections that are too small: tile just those, then re-run
             # detection on the tiles.
             api.warn_user_if_directory_exists(os.path.join(input_folder, "tile"), silent=True, make_dir=False)
-            #images, labels = api.get_images_and_labels(input_folder, args.output)
             selected_images = [list_images[i] for i in range(len(list_images)) if i in smaller_insects_indices]
             selected_labels = [list_labels[i] for i in range(len(list_labels)) if i in smaller_insects_indices]
             if not args.silent:
@@ -207,21 +209,23 @@ def main(args):
 
             # Complete the merged tile-based results (which only cover the small-bbox images)
             # with the untouched original detections of the images that didn't need tiling.
-            api.update_labels(merged_tile_labels, os.path.join(input_folder, "output"))
+            api.update_labels(merged_tile_labels, os.path.join(input_folder, "output"), overlap_threshold=args.max_overlap)
+            shutil.rmtree(os.path.join(input_folder, "tile"))
 
             if input_folder.endswith("tile"):
                 # We're inside a recursive call ourselves: our own images are tiles of a parent
                 # image, so merge them one level further up before returning.
                 if not args.silent:
                     print("Merging tiles...")
-                return api.merge_tiles(input_folder, args.output)
+                #return api.merge_tiles(input_folder, args.output, overlap_threshold=args.max_overlap)
+                return api.merge_tiles(input_folder, args.output, args.max_overlap)
             else:
                 # Top-level call: the backup has been folded back into "output", clean it up.
                 shutil.rmtree(os.path.join(input_folder, "output"))
                 # merge_tiles() always writes confidence; strip it back out if the caller didn't
                 # actually ask for it in the final output.
                 if not args.write_conf:
-                    api.remove_conf_column_folder("output")
+                    api.remove_conf_column_folder(args.output)
 
 
 def parse_args():
