@@ -1185,7 +1185,8 @@ def select_smaller_insect_boxes(label_files, bbox_area_threshold=0.001, conf_thr
 
     return selected_idx
 
-def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_factor=2, silent=True):
+def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_factor=2, silent=True,
+         train=False, min_visible=0.5):
     """
     Crops 4 overlapping corner tiles out of each given image, to reduce how much small insects
     get downscaled at inference time compared to running detection on the full image.
@@ -1199,7 +1200,9 @@ def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_fac
     always 4 (one per corner).
 
     Only the cropped tile images are written, to `image_folder/tile_folder`; their annotations
-    are produced later by running detection on them.
+    are produced later by running detection on them. With `train=True`, the tile annotations are
+    instead derived right away from the parent's (ground-truth) label file, and tiles/labels go to
+    `tile_folder/images` and `tile_folder/labels` (the layout of a training dataset).
 
     Args:
         images (list[str]): Image filenames (in `image_folder`) to tile.
@@ -1210,11 +1213,20 @@ def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_fac
         tile_folder (str): Subdirectory of `image_folder` to create and write tiles into.
         n_tiles (int): Divisor used to size each tile relative to the image (see above).
         margin_factor (float): Multiplier applied to the mean bbox size when computing the margin.
+        train (bool): If True, also write each tile's ground-truth label file (see above).
+        min_visible (float): Only with `train`: minimum fraction of a box's area that must lie inside
+            a tile for the box to be kept in that tile's labels.
 
     Returns:
         None
     """
-    os.makedirs(os.path.join(image_folder, tile_folder))
+    if train:
+        tile_images_dir = os.path.join(image_folder, tile_folder, "images")
+        tile_labels_dir = os.path.join(image_folder, tile_folder, "labels")
+        os.makedirs(tile_labels_dir)
+    else:
+        tile_images_dir = os.path.join(image_folder, tile_folder)
+    os.makedirs(tile_images_dir)
     for image_path, label_path in zip(images, labels):
         #image_path = os.path.join(image_folder, image_name)
         #label_path = os.path.join(label_folder, label_name)
@@ -1250,14 +1262,31 @@ def tile(images, labels, image_folder, tile_folder="tile", n_tiles=2, margin_fac
             if image_name.lower().endswith(ext):
                 current_ext = image_name[-len(ext):]
 
+        gt_boxes = [yolo_to_bbox(x, img_w, img_h) for x in pred_list]  # parent boxes, absolute pixels
+
         for tile_id, (x0, y0) in corners.items():
             x1, y1 = x0 + crop_w, y0 + crop_h
+            tile_name = image_name[:-len(current_ext)] + f"_tile{tile_id}"
             # cv2.imwrite silently falls back to uint8 for float32 input (harmless warning, no data loss)
             cropped_region = image[y0:y1, x0:x1].astype(np.float32)
-            cv2.imwrite(os.path.join(os.path.join(image_folder, tile_folder), image_name[:-len(current_ext)] + f"_tile{tile_id}{current_ext}"), cropped_region)
+            cv2.imwrite(os.path.join(tile_images_dir, tile_name + current_ext), cropped_region)
+
+            if train:
+                # Clip each parent box to the tile and re-express it in tile coordinates. Clipping is
+                # needed because YOLO training rejects a whole image if any label lies outside [0, 1].
+                # Boxes mostly cut off by the tile border are dropped.
+                tile_boxes = []
+                for bx0, by0, bx1, by1, conf in gt_boxes:
+                    ix0, iy0, ix1, iy1 = max(bx0, x0), max(by0, y0), min(bx1, x1), min(by1, y1)
+                    if ix1 <= ix0 or iy1 <= iy0:
+                        continue
+                    if (ix1 - ix0) * (iy1 - iy0) < min_visible * (bx1 - bx0) * (by1 - by0):
+                        continue
+                    tile_boxes.append([ix0 - x0, iy0 - y0, ix1 - x0, iy1 - y0, conf])
+                save_yolo_format(tile_boxes, (crop_w, crop_h), os.path.join(tile_labels_dir, tile_name + ".txt"))
 
 
-def merge_tiles(current_input, current_output, overlap_threshold=0.5):
+def merge_tiles(current_input, current_output, overlap_threshold=0.5, iou_threshold=0.5):
     """
     Reprojects each image's 4 tile-level predictions back into the original image's coordinate
     system, deduplicates them (tiles overlap at the center, so the same insect can be detected
@@ -1330,6 +1359,7 @@ def merge_tiles(current_input, current_output, overlap_threshold=0.5):
                 raw_boxes_px.append(yolo_to_bbox((xc_orig, yc_orig, w_orig, h_orig, conf), img_w, img_h))
 
         merged_boxes_px = remove_overlapping_regions(raw_boxes_px, overlap_treshold=overlap_threshold)  # drop duplicates from tile overlap
+        merged_boxes_px = remove_overlapping_regions_wrt_iou(merged_boxes_px, overlap_treshold=iou_threshold)
         # reuse the first tile's label name, stripped of its "_tileN" suffix, for the merged file
         label_root, label_ext = os.path.splitext(labels[idx])
         merged_label_path = label_root[:-6] + label_ext
@@ -1338,7 +1368,7 @@ def merge_tiles(current_input, current_output, overlap_threshold=0.5):
     #shutil.rmtree(current_input)
     return current_output
 
-def update_labels(new_folder, old_folder, overlap_threshold=0.5):
+def update_labels(new_folder, old_folder, overlap_threshold=0.5, iou_threshold=0.5):
     for filename in os.listdir(old_folder):
         if not filename.endswith(".txt"):
             continue
@@ -1353,6 +1383,7 @@ def update_labels(new_folder, old_folder, overlap_threshold=0.5):
             # remove_overlapping_regions ne changent pas, puisque les facteurs d'échelle par axe s'annulent.
             boxes = [yolo_to_bbox(x, 1, 1) for x in pred_list]
             boxes = remove_overlapping_regions(boxes, overlap_treshold=overlap_threshold)
+            boxes = remove_overlapping_regions_wrt_iou(boxes, overlap_treshold=iou_threshold)
             save_yolo_format(boxes, (1, 1), new_path, write_conf=True)
 
 

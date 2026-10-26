@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -452,3 +453,55 @@ if __name__ == "__main__":
                                             seed=cli_args.seed, original_features=cli_original_features)
     with open(cli_args.output_file, "w") as f:
         json.dump(list(cli_indices), f)
+
+def get_img_dims(image_path):
+    image = Image.open(image_path)
+    return image.size
+
+def store_tiles(input_folder, dest, args):
+    """
+    Training-time counterpart of the recursive tiling in inference_pipeline.py: images whose
+    ground-truth boxes are too small are tiled (recursively, tiles of tiles), and the results are
+    copied to `dest` while climbing back up the recursion instead of merging predictions.
+    `input_folder` must contain `images/` and `labels/`; tiles get their labels from the parent's.
+    The end result in `dest` (which needs `images/` and `labels/`) is the set of leaves of the
+    tiling tree: untouched images, plus tiles in place of every image that was tiled.
+
+    Returns:
+        set[str]: Stems of the images of the folder above (the parents) that have at least one
+            saved descendant. Only meaningful when `input_folder` is a "tile" folder.
+    """
+    img_dir, lbl_dir = os.path.join(input_folder, "images"), os.path.join(input_folder, "labels")
+    images, labels = api.get_images_and_labels(img_dir, lbl_dir)  # bare file names
+    image_paths = [os.path.join(img_dir, f) for f in images]
+    label_paths = [os.path.join(lbl_dir, f) for f in labels]
+
+    # Same selection rule as at inference: small mean box area, and image large enough to be worth tiling
+    smaller_insects_indices = api.select_smaller_insect_boxes(label_paths, bbox_area_threshold=args.min_bbox)
+    smaller_insects_indices = [i for i in smaller_insects_indices if max(get_img_dims(image_paths[i])) > 2*args.img_size]
+
+    already_saved = set()
+    if len(smaller_insects_indices) == 0:
+        if not args.silent:
+            print("Saving tiles...")
+    else:
+        api.warn_user_if_directory_exists(os.path.join(input_folder, "tile"), silent=True, make_dir=False)
+        selected_images = [image_paths[i] for i in range(len(images)) if i in smaller_insects_indices]
+        selected_labels = [label_paths[i] for i in range(len(labels)) if i in smaller_insects_indices]
+        if not args.silent:
+            print(f"{len(selected_images)} images/tiles have small insects, tiling...")
+        # train=True: writes tile/images and tile/labels, the labels being cut out of the parent's labels
+        api.tile(selected_images, selected_labels, input_folder, silent=args.silent, train=True)
+        # Recurse on the tiles; returns the stems of this folder's images that have saved descendants
+        already_saved = store_tiles(os.path.join(input_folder, "tile"), dest, args)
+
+    # Climbing back up: strip "_tileN" to pass the parents' stems up. Images with a saved descendant
+    # were replaced by their tiles; every other image is a leaf and is copied to dest.
+    ret_set = {stem[:-6] for stem in already_saved}  # already_saved holds stems (no extension)
+    for i in range(len(images)):
+        if os.path.splitext(images[i])[0] not in already_saved:
+            shutil.copy2(os.path.join(input_folder, "images", images[i]), os.path.join(dest, "images", images[i]))
+            shutil.copy2(os.path.join(input_folder, "labels", labels[i]), os.path.join(dest, "labels", labels[i]))
+            if input_folder.endswith("tile"):
+                ret_set.add(os.path.splitext(images[i])[0][:-6])
+    return ret_set

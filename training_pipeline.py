@@ -25,6 +25,34 @@ import training_api
 
 seed = 69
 
+def tile_dataset(args, subfolder_name):
+    """
+    Replaces, in place, the images of one split folder (`args.dataset/subfolder_name`, e.g. 'train',
+    'val' or 'stabilization') by their tiles (see training_api.store_tiles). Meant to be called once
+    per split, after the split, so tiles of one image never end up in two splits. Destructive: the
+    original split folder is deleted, so the full images of that split are not kept.
+
+    Args:
+        args: Parsed arguments (dataset, verbose, silent, min_bbox, img_size).
+        subfolder_name (str): Split to tile; must contain `images/` and `labels/`.
+    """
+    if args.verbose:
+        args.silent = False
+
+    dataset_dir = args.dataset
+    # store_tiles writes the tiled split to a fresh 'temp' folder, which then replaces the split
+    api.warn_user_if_directory_exists(os.path.join(dataset_dir, "temp"), silent=True, make_dir=True)
+    os.mkdir(os.path.join(dataset_dir, "temp", "images"))
+    os.mkdir(os.path.join(dataset_dir, "temp", "labels"))
+
+    training_api.store_tiles(os.path.join(dataset_dir, subfolder_name), os.path.join(dataset_dir, "temp"), args)
+    if subfolder_name == "":
+        api.warn_user_if_directory_exists(os.path.join(dataset_dir, "tile"), silent=True, make_dir=False)
+        os.rename(os.path.join(dataset_dir, "temp"), os.path.join(dataset_dir, "tile"))
+    else:
+        shutil.rmtree(os.path.join(dataset_dir, subfolder_name))
+        os.rename(os.path.join(dataset_dir, "temp"), os.path.join(dataset_dir, subfolder_name))
+
 
 def prepare_dataset(args):
     """
@@ -163,6 +191,14 @@ def main(args):
 
     # Unless no_split is True, split dataset in train and validation and build yaml file
     prepare_dataset(args)
+    if args.tiling:
+        if args.no_split:
+            tile_dataset(args, "")
+        else:
+            tile_dataset(args, "train")
+            tile_dataset(args, "val")
+            if args.stabilization:
+                tile_dataset(args, "stabilization")
 
     # Train the detector using dynamic multi-phase fine-tuning
     if not args.classification_only:
@@ -531,6 +567,23 @@ def parse_args():
         "--stabilization",
         action="store_true",
         help="If set, sets aside a stabilization set (never used for train/val) to fine-tune/validate on at some later iteration"
+    )
+    parser.add_argument(
+        "--tiling",
+        action="store_true",
+        help="Zooms in for small insects."
+    )
+    parser.add_argument(
+        "--min_bbox",
+        type=float,
+        default=0.001,
+        help="Minimum mean bbox area ratio relative to total image. When less, "
+             "tiling occurs to increase its size (default: 0.001)"
+    )
+    parser.add_argument(
+        "--silent",
+        action="store_true",
+        help="Nothing printed in stdout"
     )
 
     return parser.parse_args()

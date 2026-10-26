@@ -180,7 +180,7 @@ def main(args):
             if input_folder.endswith("tile"):
                 if not args.silent:
                     print("Merging tiles...")
-                return api.merge_tiles(input_folder, args.output, args.max_overlap)
+                return api.merge_tiles(input_folder, args.output, overlap_threshold=args.max_overlap, iou_threshold=args.max_iou)
             # Otherwise (top-level call, nothing needed tiling): nothing more to do.
         else:
             # Some images have detections that are too small: tile just those, then re-run
@@ -209,7 +209,7 @@ def main(args):
 
             # Complete the merged tile-based results (which only cover the small-bbox images)
             # with the untouched original detections of the images that didn't need tiling.
-            api.update_labels(merged_tile_labels, os.path.join(input_folder, "output"), overlap_threshold=args.max_overlap)
+            api.update_labels(merged_tile_labels, os.path.join(input_folder, "output"), overlap_threshold=args.max_overlap, iou_threshold=args.max_iou)
             shutil.rmtree(os.path.join(input_folder, "tile"))
 
             if input_folder.endswith("tile"):
@@ -218,7 +218,7 @@ def main(args):
                 if not args.silent:
                     print("Merging tiles...")
                 #return api.merge_tiles(input_folder, args.output, overlap_threshold=args.max_overlap)
-                return api.merge_tiles(input_folder, args.output, args.max_overlap)
+                return api.merge_tiles(input_folder, args.output, overlap_threshold=args.max_overlap, iou_threshold=args.max_iou)
             else:
                 # Top-level call: the backup has been folded back into "output", clean it up.
                 shutil.rmtree(os.path.join(input_folder, "output"))
