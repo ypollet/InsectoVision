@@ -92,7 +92,10 @@ class BBox:
             return Status.CONFIRMED
         if self.conf == 0:
             return Status.REJECTED
-        return Status.SURE if (self.conf >= self.parent.conf_threshold) else Status.DOUBT
+        if (self.conf >= self.parent.conf_threshold):
+            return Status.SURE
+        
+        return Status.DOUBT if (self.conf >= (self.parent.conf_threshold - 0.1)) else Status.DOUBT_HIDE
     
 
     def color(self):

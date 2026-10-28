@@ -23,6 +23,7 @@ SELECTING = 3
 class Status(Flag):
     SELECTED=auto()     #User has selected the bbox
     REJECTED=auto()     #User has confirmed the bbox is incorrect
+    DOUBT_HIDE=auto()   #AI's confidence is very below threshold and should not appear
     DOUBT=auto()        #AI's confidence is below threshold
     SURE=auto()         #AI's confidence is above threshold
     CONFIRMED=auto()    #User has confirmed the bbox is correct
@@ -33,8 +34,9 @@ class Status(Flag):
 COLORS =    {
                 Status.SELECTED:"blue",
                 Status.REJECTED:"red",
+                Status.DOUBT_HIDE:"gold4",
                 Status.DOUBT:"gold",
-                Status.SURE:"green1",
+                Status.SURE:"green4",
                 Status.CONFIRMED:"cyan",
             }
 

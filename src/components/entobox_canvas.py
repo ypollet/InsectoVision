@@ -137,7 +137,7 @@ class EntoboxCanvas(CanvasImage):
         x2, y2 = self.__ratio2canvas(x2, y2)
 
         stipple = "gray50" if bbox.status() == Status.DOUBT else ""
-        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,outlinestipple=stipple,tags=["bbox", "rectangle", bbox.id, bbox.status()]) #, fill=bbox.color(), stipple="gray12")
+        boxid = self.canvas.create_rectangle(x1,y1,x2,y2, outline=bbox.color(),width=WIDTH_LINE,outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()]) #, fill=bbox.color(), stipple="gray12")
         self.canvas.tag_bind(boxid, '<Button-1>', lambda e: self.select_rec(boxid, e))
         self.canvas.tag_bind(boxid, '<Control-1>', lambda e: self.select_many_rec(boxid, e))
         
@@ -157,6 +157,9 @@ class EntoboxCanvas(CanvasImage):
         self.bind_points_events(point_id_second, boxid)
         bbox.coord.second.itemId = point_id_second
         self.points_id[point_id_second] = bbox.coord.second
+
+        #Hide or or not bbox
+        self.canvas.itemconfig(bbox.id, state="hidden" if bbox.status() == Status.DOUBT_HIDE else "normal")
 
     def bind_points_events(self, pointId, boxId):
         self.canvas.tag_bind(pointId, '<B1-Motion>', lambda e: self.__move_point(pointId, boxId, e))
@@ -275,6 +278,7 @@ class EntoboxCanvas(CanvasImage):
         self.canvas.itemconfig(bbox.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
         self.canvas.itemconfig(bbox.coord.first.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
         self.canvas.itemconfig(bbox.coord.second.itemId, outline=color, outlinestipple=stipple, tags=["bbox", "rectangle", bbox.id, bbox.status()])
+        self.canvas.itemconfig(bbox.id, state="hidden" if bbox.status() == Status.DOUBT_HIDE else "normal")
 
     def delete_bbox(self, bbox : BBox):
         self.canvas.delete(bbox.id)
