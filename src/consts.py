@@ -36,7 +36,7 @@ COLORS =    {
                 Status.REJECTED:"red",
                 Status.DOUBT_HIDE:"gold4",
                 Status.DOUBT:"gold",
-                Status.SURE:"green4",
+                Status.SURE:"green",
                 Status.CONFIRMED:"cyan",
             }
 
